@@ -77,7 +77,7 @@ class OrderService:
             wishlist_id=wishlist_id,
             admin_id=admin_id,
             stripe_session_id=stripe_session_id,
-            status=OrderStatus.PENDING,
+            status=OrderStatus.PENDING.value,
             total_amount=total_amount,
             currency="USD"
         )
@@ -112,7 +112,7 @@ class OrderService:
         if not order:
             raise NotFoundException("Order not found")
         
-        order.status = OrderStatus.PAID
+        order.status = OrderStatus.PAID.value
         order.paid_at = datetime.utcnow()
         
         await self.db.flush()
@@ -130,7 +130,7 @@ class OrderService:
         if not order:
             raise NotFoundException("Order not found")
         
-        order.status = OrderStatus.FAILED
+        order.status = OrderStatus.FAILED.value
         
         await self.db.flush()
         await self.db.refresh(order)
@@ -160,3 +160,84 @@ class OrderService:
             .order_by(Order.created_at.desc())
         )
         return list(result.scalars().all())
+    
+    async def get_all(
+        self,
+        status: Optional[OrderStatus] = None
+    ) -> List[Order]:
+        """Get all orders, optionally filtered by status."""
+        query = select(Order)
+        
+        if status:
+            query = query.where(Order.status == status.value)
+        
+        query = query.order_by(Order.created_at.desc())
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_admin_orders(
+        self,
+        admin_id: UUID
+    ) -> List[Order]:
+        """Get all orders for an admin's wishlists."""
+        result = await self.db.execute(
+            select(Order)
+            .where(Order.admin_id == admin_id)
+            .order_by(Order.created_at.desc())
+        )
+        return list(result.scalars().all())
+    
+    async def get_manager_orders(
+        self,
+        manager_id: UUID
+    ) -> List[Order]:
+        """Get all orders for wishlists managed by a manager."""
+        result = await self.db.execute(
+            select(Order)
+            .join(Wishlist, Order.wishlist_id == Wishlist.id)
+            .where(Wishlist.manager_id == manager_id)
+            .order_by(Order.created_at.desc())
+        )
+        return list(result.scalars().all())
+    
+    async def update(
+        self,
+        order_id: UUID,
+        status: Optional[OrderStatus] = None,
+        total_amount: Optional[Decimal] = None,
+        paid_at: Optional[datetime] = None
+    ) -> Order:
+        """Update order details."""
+        order = await self.get_by_id(order_id)
+        
+        if not order:
+            raise NotFoundException("Order not found")
+        
+        if status is not None:
+            order.status = status.value if isinstance(status, OrderStatus) else status
+            
+            # Auto-set paid_at when marking as paid
+            if status == OrderStatus.PAID and not order.paid_at:
+                order.paid_at = datetime.utcnow()
+        
+        if total_amount is not None:
+            order.total_amount = total_amount
+        
+        if paid_at is not None:
+            order.paid_at = paid_at
+        
+        await self.db.flush()
+        await self.db.refresh(order)
+        
+        return order
+    
+    async def delete(self, order_id: UUID) -> None:
+        """Delete an order."""
+        order = await self.get_by_id(order_id)
+        
+        if not order:
+            raise NotFoundException("Order not found")
+        
+        await self.db.delete(order)
+        await self.db.flush()

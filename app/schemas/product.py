@@ -9,22 +9,23 @@ class ProductBase(BaseModel):
     """Base product schema."""
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    price: Decimal = Field(..., gt=0, decimal_places=2)
+    price: Decimal = Field(..., gt=0)
     images: Optional[List[str]] = Field(default_factory=list)
 
 
 class ProductCreate(ProductBase):
     """Schema for creating a product."""
-    pass
+    vendor_ids: Optional[List[UUID]] = Field(default_factory=list, description="Optional list of vendor IDs to associate with the product")
 
 
 class ProductUpdate(BaseModel):
     """Schema for updating a product."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
-    price: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    price: Optional[Decimal] = Field(None, gt=0)
     images: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    vendor_ids: Optional[List[UUID]] = Field(None, description="Optional list of vendor IDs to associate with the product")
 
 
 class ProductResponse(ProductBase):

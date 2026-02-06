@@ -71,7 +71,7 @@ class WishlistService:
         result = await self.db.execute(
             select(Wishlist).where(
                 Wishlist.admin_id == admin_id,
-                Wishlist.status == WishlistStatus.PUBLISHED
+                Wishlist.status == WishlistStatus.PUBLISHED.value
             )
         )
         return result.scalar_one_or_none()
@@ -113,7 +113,7 @@ class WishlistService:
             admin_id=admin_id,
             manager_id=manager_id,
             public_slug=slug,
-            status=WishlistStatus.DRAFT,
+            status=WishlistStatus.DRAFT.value,
             title=title,
             description=description,
             logo_url=logo_url,
@@ -179,7 +179,7 @@ class WishlistService:
         if wishlist.admin_id != admin_id:
             raise PermissionDenied("You can only publish your own wishlists")
         
-        if wishlist.status == WishlistStatus.PUBLISHED:
+        if wishlist.status == WishlistStatus.PUBLISHED.value:
             raise ConflictError("Wishlist is already published")
         
         # Check if admin has another published wishlist
@@ -192,7 +192,7 @@ class WishlistService:
         
         # Update status
         from datetime import datetime
-        wishlist.status = WishlistStatus.PUBLISHED
+        wishlist.status = WishlistStatus.PUBLISHED.value
         wishlist.published_at = datetime.utcnow()
         
         await self.db.flush()
@@ -268,3 +268,131 @@ class WishlistService:
         
         await self.db.delete(wishlist_product)
         await self.db.flush()
+    
+    async def create_with_products(
+        self,
+        admin_id: UUID,
+        manager_id: UUID,
+        products: List[dict],
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        logo_url: Optional[str] = None,
+        header_image_url: Optional[str] = None,
+        primary_color: Optional[str] = None,
+        secondary_color: Optional[str] = None,
+        delivery_address: Optional[dict] = None
+    ) -> Wishlist:
+        """Create a new wishlist and add products in one operation."""
+        # Create the wishlist
+        wishlist = await self.create(
+            admin_id=admin_id,
+            manager_id=manager_id,
+            title=title,
+            description=description,
+            logo_url=logo_url,
+            header_image_url=header_image_url,
+            primary_color=primary_color,
+            secondary_color=secondary_color,
+            delivery_address=delivery_address
+        )
+        
+        # Add products if provided
+        if products:
+            product_ids = [p["product_id"] for p in products]
+            
+            # Verify all products exist and are active
+            result = await self.db.execute(
+                select(Product).where(
+                    Product.id.in_(product_ids),
+                    Product.is_active == True
+                )
+            )
+            existing_products = list(result.scalars().all())
+            
+            if len(existing_products) != len(product_ids):
+                raise NotFoundException("One or more products not found or inactive")
+            
+            # Add each product
+            for product_data in products:
+                wishlist_product = WishlistProduct(
+                    wishlist_id=wishlist.id,
+                    product_id=product_data["product_id"],
+                    quantity=product_data.get("quantity", 1)
+                )
+                self.db.add(wishlist_product)
+            
+            await self.db.flush()
+            await self.db.refresh(wishlist, attribute_names=["products"])
+        
+        return wishlist
+    
+    async def update_products(
+        self,
+        wishlist_id: UUID,
+        products: List[dict]
+    ) -> Wishlist:
+        """
+        Update products in a wishlist (replaces all existing products).
+        
+        Args:
+            wishlist_id: ID of the wishlist
+            products: List of dicts with product_id and quantity
+        """
+        wishlist = await self.get_by_id(wishlist_id)
+        
+        if not wishlist:
+            raise NotFoundException("Wishlist not found")
+        
+        # Remove all existing products
+        result = await self.db.execute(
+            select(WishlistProduct).where(WishlistProduct.wishlist_id == wishlist_id)
+        )
+        for wp in result.scalars().all():
+            await self.db.delete(wp)
+        
+        # Add new products
+        if products:
+            product_ids = [p["product_id"] for p in products]
+            
+            # Verify all products exist and are active
+            result = await self.db.execute(
+                select(Product).where(
+                    Product.id.in_(product_ids),
+                    Product.is_active == True
+                )
+            )
+            existing_products = list(result.scalars().all())
+            
+            if len(existing_products) != len(product_ids):
+                raise NotFoundException("One or more products not found or inactive")
+            
+            # Add each product
+            for product_data in products:
+                wishlist_product = WishlistProduct(
+                    wishlist_id=wishlist_id,
+                    product_id=product_data["product_id"],
+                    quantity=product_data.get("quantity", 1)
+                )
+                self.db.add(wishlist_product)
+        
+        await self.db.flush()
+        await self.db.refresh(wishlist, attribute_names=["products"])
+        
+        return wishlist
+    
+    async def delete(self, wishlist_id: UUID) -> None:
+        """Delete a wishlist."""
+        wishlist = await self.get_by_id(wishlist_id)
+        
+        if not wishlist:
+            raise NotFoundException("Wishlist not found")
+        
+        await self.db.delete(wishlist)
+        await self.db.flush()
+    
+    async def get_all(self) -> List[Wishlist]:
+        """Get all wishlists (super admin only)."""
+        result = await self.db.execute(
+            select(Wishlist).order_by(Wishlist.created_at.desc())
+        )
+        return list(result.scalars().all())

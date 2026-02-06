@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas.user import (
+    UserRegister,
     UserLogin,
     TokenResponse,
     UserResponse,
@@ -17,6 +18,40 @@ from app.models.user import UserRole
 from app.core.exceptions import UnauthorizedError, ConflictError
 
 router = APIRouter()
+
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    registration: UserRegister,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Register a new user account.
+    
+    Creates a new user with VISITOR role and returns JWT access token.
+    Users are automatically logged in after successful registration.
+    """
+    auth_service = AuthService(db)
+    
+    try:
+        user, token = await auth_service.register_user(
+            email=registration.email,
+            password=registration.password,
+            full_name=registration.full_name
+        )
+        
+        await db.commit()
+        
+        return TokenResponse(
+            access_token=token,
+            token_type="bearer",
+            user=UserResponse.model_validate(user)
+        )
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
 
 
 @router.post("/login", response_model=TokenResponse)

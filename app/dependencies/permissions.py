@@ -38,17 +38,17 @@ async def verify_wishlist_ownership(
         raise NotFoundException("Wishlist not found")
     
     # Super admin can access everything
-    if current_user.role == UserRole.SUPER_ADMIN:
+    if current_user.role == UserRole.SUPER_ADMIN.value:
         return wishlist
     
     # Admin can only access their own wishlists
-    if current_user.role == UserRole.ADMIN:
+    if current_user.role == UserRole.ADMIN.value:
         if wishlist.admin_id != current_user.id:
             raise PermissionDenied("You can only access your own wishlists")
         return wishlist
     
     # Manager can only access wishlists they manage
-    if current_user.role == UserRole.MANAGER:
+    if current_user.role == UserRole.MANAGER.value:
         if wishlist.manager_id != current_user.id:
             raise PermissionDenied("You can only access wishlists you manage")
         return wishlist
@@ -77,7 +77,7 @@ async def verify_admin_belongs_to_manager(
         PermissionDenied: If admin doesn't belong to manager
         NotFoundException: If admin not found
     """
-    if current_user.role != UserRole.MANAGER:
+    if current_user.role != UserRole.MANAGER.value:
         raise PermissionDenied("Only managers can verify admin ownership")
     
     from app.services.user_service import UserService
@@ -104,10 +104,10 @@ def require_roles(*allowed_roles: UserRole):
             pass
     """
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles:
-            role_names = [role.value for role in allowed_roles]
+        allowed_role_values = [role.value for role in allowed_roles]
+        if current_user.role not in allowed_role_values:
             raise PermissionDenied(
-                f"Access denied. Required roles: {', '.join(role_names)}"
+                f"Access denied. Required roles: {', '.join(allowed_role_values)}"
             )
         return current_user
     

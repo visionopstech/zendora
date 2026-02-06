@@ -1,0 +1,165 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from uuid import UUID
+from typing import Optional, List
+
+from app.models.user import User, UserRole
+from app.core.security import hash_password
+from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
+
+
+class UserManagementService:
+    """Service for user management operations (CRUD)."""
+    
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    async def get_by_id(self, user_id: UUID) -> Optional[User]:
+        """Get user by ID."""
+        result = await self.db.execute(
+            select(User).where(User.id == user_id)
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_email(self, email: str) -> Optional[User]:
+        """Get user by email."""
+        result = await self.db.execute(
+            select(User).where(User.email == email)
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_all(
+        self,
+        role: Optional[UserRole] = None,
+        include_inactive: bool = False
+    ) -> List[User]:
+        """Get all users, optionally filtered by role."""
+        query = select(User)
+        
+        if role:
+            query = query.where(User.role == role.value)
+        
+        if not include_inactive:
+            query = query.where(User.is_active == True)
+        
+        query = query.order_by(User.created_at.desc())
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_manager_admins(self, manager_id: UUID) -> List[User]:
+        """Get all admins belonging to a specific manager."""
+        result = await self.db.execute(
+            select(User).where(
+                User.manager_id == manager_id,
+                User.role == UserRole.ADMIN.value
+            ).order_by(User.created_at.desc())
+        )
+        return list(result.scalars().all())
+    
+    async def create(
+        self,
+        email: str,
+        password: str,
+        role: UserRole,
+        full_name: Optional[str] = None,
+        manager_id: Optional[UUID] = None
+    ) -> User:
+        """Create a new user."""
+        # Check if email already exists
+        existing_user = await self.get_by_email(email)
+        if existing_user:
+            raise ConflictError("User with this email already exists")
+        
+        # Validate role-specific requirements
+        if role == UserRole.ADMIN and not manager_id:
+            raise PermissionDenied("ADMIN users must have a manager_id")
+        
+        # Verify manager exists if manager_id provided
+        if manager_id:
+            manager = await self.get_by_id(manager_id)
+            if not manager:
+                raise NotFoundException("Manager not found")
+            if manager.role != UserRole.MANAGER.value:
+                raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
+        
+        password_hash = hash_password(password)
+        
+        user = User(
+            email=email,
+            password_hash=password_hash,
+            full_name=full_name,
+            role=role.value if isinstance(role, UserRole) else role,
+            manager_id=manager_id,
+            is_active=True
+        )
+        
+        self.db.add(user)
+        await self.db.flush()
+        await self.db.refresh(user)
+        
+        return user
+    
+    async def update(
+        self,
+        user_id: UUID,
+        email: Optional[str] = None,
+        full_name: Optional[str] = None,
+        role: Optional[UserRole] = None,
+        is_active: Optional[bool] = None,
+        manager_id: Optional[UUID] = None,
+        password: Optional[str] = None
+    ) -> User:
+        """Update user details."""
+        user = await self.get_by_id(user_id)
+        
+        if not user:
+            raise NotFoundException("User not found")
+        
+        # Check email uniqueness if changing email
+        if email and email != user.email:
+            existing_user = await self.get_by_email(email)
+            if existing_user:
+                raise ConflictError("User with this email already exists")
+            user.email = email
+        
+        if full_name is not None:
+            user.full_name = full_name
+        
+        if role is not None:
+            role_value = role.value if isinstance(role, UserRole) else role
+            user.role = role_value
+            
+            # Validate role-specific requirements
+            if role == UserRole.ADMIN and not (user.manager_id or manager_id):
+                raise PermissionDenied("ADMIN users must have a manager_id")
+        
+        if is_active is not None:
+            user.is_active = is_active
+        
+        if manager_id is not None:
+            # Verify manager exists
+            manager = await self.get_by_id(manager_id)
+            if not manager:
+                raise NotFoundException("Manager not found")
+            if manager.role != UserRole.MANAGER.value:
+                raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
+            user.manager_id = manager_id
+        
+        if password:
+            user.password_hash = hash_password(password)
+        
+        await self.db.flush()
+        await self.db.refresh(user)
+        
+        return user
+    
+    async def delete(self, user_id: UUID) -> None:
+        """Delete a user."""
+        user = await self.get_by_id(user_id)
+        
+        if not user:
+            raise NotFoundException("User not found")
+        
+        await self.db.delete(user)
+        await self.db.flush()

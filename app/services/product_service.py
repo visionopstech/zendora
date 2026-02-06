@@ -26,9 +26,12 @@ class ProductService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
     
-    async def get_all(self, include_inactive: bool = False) -> List[Product]:
+    async def get_all(self, include_inactive: bool = False, load_vendors: bool = False) -> List[Product]:
         """Get all products."""
         query = select(Product)
+        
+        if load_vendors:
+            query = query.options(selectinload(Product.vendor_associations))
         
         if not include_inactive:
             query = query.where(Product.is_active == True)
@@ -67,6 +70,47 @@ class ProductService:
         self.db.add(product)
         await self.db.flush()
         await self.db.refresh(product)
+        
+        return product
+    
+    async def create_with_vendors(
+        self,
+        name: str,
+        price: Decimal,
+        vendor_ids: List[UUID],
+        description: Optional[str] = None,
+        images: Optional[List[str]] = None
+    ) -> Product:
+        """Create a new product and associate it with vendors in one operation."""
+        # Create the product
+        product = await self.create(
+            name=name,
+            price=price,
+            description=description,
+            images=images
+        )
+        
+        # Associate vendors if provided
+        if vendor_ids:
+            # Verify all vendors exist
+            result = await self.db.execute(
+                select(Vendor).where(Vendor.id.in_(vendor_ids))
+            )
+            vendors = list(result.scalars().all())
+            
+            if len(vendors) != len(vendor_ids):
+                raise NotFoundException("One or more vendors not found")
+            
+            # Create associations
+            for vendor_id in vendor_ids:
+                association = ProductVendor(
+                    product_id=product.id,
+                    vendor_id=vendor_id
+                )
+                self.db.add(association)
+            
+            await self.db.flush()
+            await self.db.refresh(product, attribute_names=["vendor_associations"])
         
         return product
     

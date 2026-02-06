@@ -7,7 +7,12 @@ from app.core.config import settings
 
 
 # Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=12,
+    bcrypt__ident="2b"
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -33,7 +38,14 @@ def hash_password(password: str) -> str:
         
     Returns:
         str: Hashed password
+    
+    Note:
+        Bcrypt has a 72-byte password limit. Passwords are truncated if needed.
     """
+    # Truncate password to 72 bytes to comply with bcrypt limit
+    if len(password.encode('utf-8')) > 72:
+        password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    
     return pwd_context.hash(password)
 
 

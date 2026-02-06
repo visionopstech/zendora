@@ -72,9 +72,10 @@ def require_role(*allowed_roles: UserRole):
             pass
     """
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles:
+        allowed_role_values = [r.value for r in allowed_roles]
+        if current_user.role not in allowed_role_values:
             raise PermissionDenied(
-                f"This action requires one of the following roles: {', '.join(r.value for r in allowed_roles)}"
+                f"This action requires one of the following roles: {', '.join(allowed_role_values)}"
             )
         return current_user
     

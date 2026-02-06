@@ -36,11 +36,30 @@ class Settings(BaseSettings):
     # Frontend
     frontend_url: str = "http://localhost:3000"
     
+    # Redis & Celery
+    redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: Optional[str] = None
+    celery_result_backend: Optional[str] = None
+    
+    # Admin Panel
+    admin_username: str = "admin"
+    admin_password: str = "changeme"
+    
     # Environment
     environment: str = "development"
     
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    
+    @property
+    def get_celery_broker_url(self) -> str:
+        """Get Celery broker URL, defaults to redis_url if not set."""
+        return self.celery_broker_url or self.redis_url
+    
+    @property
+    def get_celery_result_backend(self) -> str:
+        """Get Celery result backend URL, defaults to redis_url if not set."""
+        return self.celery_result_backend or self.redis_url
     
     @property
     def is_production(self) -> bool:

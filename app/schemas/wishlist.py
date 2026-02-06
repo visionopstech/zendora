@@ -35,15 +35,22 @@ class WishlistBase(BaseModel):
     delivery_address: Optional[DeliveryAddress] = None
 
 
+class WishlistProductInput(BaseModel):
+    """Schema for product input when creating/updating wishlist."""
+    product_id: UUID
+    quantity: int = Field(default=1, ge=1)
+
+
 class WishlistCreate(WishlistBase):
     """Schema for creating a wishlist."""
     admin_email: str  # For manager to assign admin
     admin_full_name: str
+    products: Optional[List[WishlistProductInput]] = Field(default_factory=list, description="Optional list of products to add to the wishlist")
 
 
 class WishlistCreateByAdmin(WishlistBase):
     """Schema for admin creating their own wishlist."""
-    pass
+    products: Optional[List[WishlistProductInput]] = Field(default_factory=list, description="Optional list of products to add to the wishlist")
 
 
 class WishlistUpdate(BaseModel):
@@ -102,3 +109,8 @@ class AddProductsRequest(BaseModel):
 class AddProductsListRequest(BaseModel):
     """Schema for adding multiple products to a wishlist."""
     products: List[AddProductsRequest]
+
+
+class UpdateWishlistProductsRequest(BaseModel):
+    """Schema for updating products in a wishlist (replaces all products)."""
+    products: List[WishlistProductInput]

@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Enum, ForeignKey, Text, JSON, Index, Integer
+from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Index, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -42,9 +42,9 @@ class Wishlist(Base):
     public_slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     
     # Status
-    status: Mapped[WishlistStatus] = mapped_column(
-        Enum(WishlistStatus),
-        default=WishlistStatus.DRAFT,
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default=WishlistStatus.DRAFT.value,
         nullable=False,
         index=True
     )

@@ -44,3 +44,10 @@ class OrderResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class OrderUpdate(BaseModel):
+    """Schema for updating an order."""
+    status: Optional[OrderStatus] = None
+    total_amount: Optional[Decimal] = Field(None, gt=0)
+    paid_at: Optional[datetime] = None

@@ -46,7 +46,7 @@ class UserService:
             email=email,
             password_hash=password_hash,
             full_name=full_name,
-            role=role,
+            role=role.value if isinstance(role, UserRole) else role,
             manager_id=manager_id,
             is_active=True
         )
@@ -104,7 +104,7 @@ class UserService:
         user = await self.create_user(
             email=email,
             password=password,
-            role=UserRole.ADMIN,
+            role=UserRole.ADMIN.value,
             full_name=full_name,
             manager_id=manager_id
         )
@@ -116,7 +116,7 @@ class UserService:
         result = await self.db.execute(
             select(User).where(
                 User.manager_id == manager_id,
-                User.role == UserRole.ADMIN
+                User.role == UserRole.ADMIN.value
             )
         )
         return list(result.scalars().all())

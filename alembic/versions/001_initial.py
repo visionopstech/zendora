@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column('email', sa.String(length=255), nullable=False),
         sa.Column('password_hash', sa.String(length=255), nullable=True),
         sa.Column('full_name', sa.String(length=255), nullable=True),
-        sa.Column('role', sa.Enum('SUPER_ADMIN', 'MANAGER', 'ADMIN', 'VISITOR', name='userrole'), nullable=False),
+        sa.Column('role', sa.String(length=50), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
         sa.Column('manager_id', sa.UUID(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
@@ -83,7 +83,7 @@ def upgrade() -> None:
         sa.Column('admin_id', sa.UUID(), nullable=False),
         sa.Column('manager_id', sa.UUID(), nullable=False),
         sa.Column('public_slug', sa.String(length=255), nullable=False),
-        sa.Column('status', sa.Enum('DRAFT', 'PUBLISHED', name='wishliststatus'), nullable=False, server_default='DRAFT'),
+        sa.Column('status', sa.String(length=50), nullable=False, server_default='DRAFT'),
         sa.Column('title', sa.String(length=255), nullable=True),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('logo_url', sa.String(length=500), nullable=True),
@@ -130,7 +130,7 @@ def upgrade() -> None:
         sa.Column('wishlist_id', sa.UUID(), nullable=False),
         sa.Column('admin_id', sa.UUID(), nullable=False),
         sa.Column('stripe_session_id', sa.String(length=255), nullable=False),
-        sa.Column('status', sa.Enum('PENDING', 'PAID', 'FAILED', 'REFUNDED', name='orderstatus'), nullable=False, server_default='PENDING'),
+        sa.Column('status', sa.String(length=50), nullable=False, server_default='PENDING'),
         sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False),
         sa.Column('currency', sa.String(length=3), nullable=False, server_default='USD'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
@@ -184,8 +184,3 @@ def downgrade() -> None:
     op.drop_index('idx_users_role', table_name='users')
     op.drop_index('idx_users_email', table_name='users')
     op.drop_table('users')
-    
-    # Drop enums
-    op.execute('DROP TYPE IF EXISTS orderstatus')
-    op.execute('DROP TYPE IF EXISTS wishliststatus')
-    op.execute('DROP TYPE IF EXISTS userrole')

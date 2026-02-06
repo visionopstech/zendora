@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Enum, ForeignKey, Numeric, Integer
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -50,9 +50,9 @@ class Order(Base):
     stripe_session_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     
     # Order details
-    status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus),
-        default=OrderStatus.PENDING,
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default=OrderStatus.PENDING.value,
         nullable=False,
         index=True
     )

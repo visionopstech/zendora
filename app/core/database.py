@@ -1,17 +1,31 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
 
 from app.core.config import settings
 
 
-# Create async engine
+# Create async engine for the API
 engine = create_async_engine(
     settings.database_url,
     echo=not settings.is_production,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+)
+
+# Create sync engine for admin panel (SQLAdmin requires sync)
+# Convert asyncpg URL to psycopg2 URL
+sync_database_url = settings.database_url.replace(
+    "postgresql+asyncpg://", "postgresql+psycopg2://"
+)
+sync_engine = create_engine(
+    sync_database_url,
+    echo=not settings.is_production,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
 )
 
 # Create session factory
@@ -45,3 +59,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+__all__ = ["Base", "engine", "sync_engine", "AsyncSessionLocal", "get_db"]

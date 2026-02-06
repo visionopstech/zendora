@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
+from app.core.database import engine
 from app.core.exceptions import (
     ZendoraException,
     NotFoundException,
@@ -14,6 +15,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.utils.logging import setup_logging
+from app.admin import setup_admin
 
 # Setup logging
 logger = setup_logging()
@@ -48,6 +50,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add session middleware for admin panel (must be before admin setup)
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.jwt_secret,
+    session_cookie="admin_session",
+    max_age=3600 * 24,  # 24 hours
+    same_site="lax",
+    https_only=settings.is_production,
+)
+
+# Setup admin panel
+admin = setup_admin(app, engine)
+logger.info("✅ Admin panel mounted at /admin")
 
 
 # Exception handlers
@@ -113,12 +130,18 @@ async def root():
 
 
 # Import and include routers
-from app.api import auth, admin, manager, admin_wishlist, wishlist_public, checkout, webhooks
+from app.api import auth, admin, manager, admin_wishlist, wishlist_public, checkout, webhooks, tasks, vendors, products, users, orders, wishlists
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(vendors.router, prefix="/api/vendors", tags=["Vendors"])
+app.include_router(products.router, prefix="/api/products", tags=["Products"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
+app.include_router(wishlists.router, prefix="/api/wishlists", tags=["Wishlists"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
 app.include_router(manager.router, prefix="/manager", tags=["Manager - Wishlists"])
 app.include_router(admin_wishlist.router, prefix="/admin", tags=["Admin - Wishlists"])
 app.include_router(wishlist_public.router, prefix="/w", tags=["Public Wishlist"])
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+app.include_router(tasks.router, prefix="/api", tags=["Background Tasks"])

@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.models.user import User, UserRole
 from app.core.security import create_access_token
-from app.core.exceptions import UnauthorizedError
+from app.core.exceptions import UnauthorizedError, ConflictError
 from app.services.user_service import UserService
 
 
@@ -22,10 +22,13 @@ class AuthService:
     
     def create_token_for_user(self, user: User) -> str:
         """Create JWT access token for a user."""
+        # Handle role - it might be a string or enum depending on context
+        role_value = user.role if isinstance(user.role, str) else user.role.value
+        
         token_data = {
             "sub": str(user.id),
             "email": user.email,
-            "role": user.role.value,
+            "role": role_value,
         }
         return create_access_token(token_data)
     
@@ -81,6 +84,34 @@ class AuthService:
         
         access_token = self.create_token_for_user(user)
         return user, access_token
+    
+    async def register_user(
+        self,
+        email: str,
+        password: str,
+        full_name: Optional[str] = None
+    ) -> tuple[User, str]:
+        """
+        Register a new user with email and password.
+        Returns user and access token.
+        """
+        # Check if user already exists
+        existing_user = await self.user_service.get_by_email(email)
+        if existing_user:
+            raise ConflictError("User with this email already exists")
+        
+        # Create new user with VISITOR role by default
+        user = await self.user_service.create_user(
+            email=email,
+            password=password,
+            role=UserRole.VISITOR,
+            full_name=full_name
+        )
+        
+        # Create access token
+        token = self.create_token_for_user(user)
+        
+        return user, token
     
     async def cleanup_expired_tokens(self):
         """Remove expired magic link tokens."""

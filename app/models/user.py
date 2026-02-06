@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Enum, ForeignKey, Index
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -36,7 +36,7 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # Role and status
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
     # Manager relationship (for ADMIN users only)
@@ -99,22 +99,22 @@ class User(Base):
     @property
     def is_super_admin(self) -> bool:
         """Check if user is a super admin."""
-        return self.role == UserRole.SUPER_ADMIN
+        return self.role == UserRole.SUPER_ADMIN.value
     
     @property
     def is_manager(self) -> bool:
         """Check if user is a manager."""
-        return self.role == UserRole.MANAGER
+        return self.role == UserRole.MANAGER.value
     
     @property
     def is_admin(self) -> bool:
         """Check if user is an admin."""
-        return self.role == UserRole.ADMIN
+        return self.role == UserRole.ADMIN.value
     
     @property
     def is_visitor(self) -> bool:
         """Check if user is a visitor."""
-        return self.role == UserRole.VISITOR
+        return self.role == UserRole.VISITOR.value
 
 
 # Index for efficient role-based queries

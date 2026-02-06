@@ -19,6 +19,13 @@ class UserCreate(UserBase):
     manager_id: Optional[UUID] = None
 
 
+class UserRegister(BaseModel):
+    """Schema for user registration."""
+    email: EmailStr
+    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+    full_name: Optional[str] = None
+
+
 class UserLogin(BaseModel):
     """Schema for user login."""
     email: EmailStr
@@ -63,3 +70,13 @@ class UserUpdate(BaseModel):
     """Schema for updating user profile."""
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
+
+
+class UserManagementUpdate(BaseModel):
+    """Schema for updating user (management operations)."""
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+    manager_id: Optional[UUID] = None
+    password: Optional[str] = Field(None, min_length=8, description="New password (optional)")
