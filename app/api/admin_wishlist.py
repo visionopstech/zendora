@@ -29,7 +29,12 @@ async def list_my_wishlists(
     wishlist_service = WishlistService(db)
     wishlists = await wishlist_service.get_admin_wishlists(current_user.id)
     
-    return [WishlistResponse.model_validate(w) for w in wishlists]
+    responses = []
+    for w in wishlists:
+        response = WishlistResponse.model_validate(w)
+        response.qr_code_url = f"/api/wishlists/{w.id}/qr-code"
+        responses.append(response)
+    return responses
 
 
 @router.post("/wishlists", response_model=WishlistResponse, status_code=status.HTTP_201_CREATED)
@@ -64,7 +69,9 @@ async def create_my_wishlist(
     
     await db.commit()
     
-    return WishlistResponse.model_validate(wishlist)
+    response = WishlistResponse.model_validate(wishlist)
+    response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+    return response
 
 
 @router.get("/wishlists/{wishlist_id}", response_model=WishlistResponse)
@@ -90,7 +97,9 @@ async def get_my_wishlist(
             detail="You can only view your own wishlists"
         )
     
-    return WishlistResponse.model_validate(wishlist)
+    response = WishlistResponse.model_validate(wishlist)
+    response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+    return response
 
 
 @router.put("/wishlists/{wishlist_id}", response_model=WishlistResponse)
@@ -134,7 +143,9 @@ async def update_my_wishlist(
         
         await db.commit()
         
-        return WishlistResponse.model_validate(wishlist)
+        response = WishlistResponse.model_validate(wishlist)
+        response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+        return response
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -252,7 +263,9 @@ async def publish_wishlist(
             wishlist.manager
         )
         
-        return WishlistResponse.model_validate(wishlist)
+        response = WishlistResponse.model_validate(wishlist)
+        response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+        return response
     except (NotFoundException, ConflictError, PermissionDenied) as e:
         status_code = e.status_code if hasattr(e, 'status_code') else status.HTTP_400_BAD_REQUEST
         raise HTTPException(

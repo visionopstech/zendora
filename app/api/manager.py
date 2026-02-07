@@ -83,7 +83,9 @@ async def create_wishlist(
     
     await db.commit()
     
-    return WishlistResponse.model_validate(wishlist)
+    response = WishlistResponse.model_validate(wishlist)
+    response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+    return response
 
 
 @router.get("/wishlists", response_model=List[WishlistResponse])
@@ -95,7 +97,12 @@ async def list_wishlists(
     wishlist_service = WishlistService(db)
     wishlists = await wishlist_service.get_manager_wishlists(current_user.id)
     
-    return [WishlistResponse.model_validate(w) for w in wishlists]
+    responses = []
+    for w in wishlists:
+        response = WishlistResponse.model_validate(w)
+        response.qr_code_url = f"/api/wishlists/{w.id}/qr-code"
+        responses.append(response)
+    return responses
 
 
 @router.put("/wishlists/{wishlist_id}", response_model=WishlistResponse)
@@ -139,7 +146,9 @@ async def update_wishlist(
         
         await db.commit()
         
-        return WishlistResponse.model_validate(wishlist)
+        response = WishlistResponse.model_validate(wishlist)
+        response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+        return response
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -170,4 +179,6 @@ async def get_wishlist(
             detail="You can only view your own wishlists"
         )
     
-    return WishlistResponse.model_validate(wishlist)
+    response = WishlistResponse.model_validate(wishlist)
+    response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+    return response

@@ -73,6 +73,7 @@ class WishlistResponse(WishlistBase):
     status: WishlistStatus
     created_at: datetime
     published_at: Optional[datetime] = None
+    qr_code_url: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -98,6 +99,7 @@ class WishlistPublicResponse(BaseModel):
     description: Optional[str]
     customization: WishlistCustomization
     products: List[ProductInWishlist]
+    qr_code_url: Optional[str] = None
 
 
 class AddProductsRequest(BaseModel):

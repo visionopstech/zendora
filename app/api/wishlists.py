@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.user import User, UserRole
 from app.models.wishlist import WishlistStatus
 from app.dependencies.auth import get_current_user, require_super_admin
@@ -17,6 +19,7 @@ from app.schemas.wishlist import (
 )
 from app.services.wishlist_service import WishlistService
 from app.services.user_service import UserService
+from app.services.qr_service import QRCodeService
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
 router = APIRouter()
@@ -141,7 +144,9 @@ async def create_wishlist(
         
         await db.commit()
         
-        return WishlistResponse.model_validate(wishlist)
+        response = WishlistResponse.model_validate(wishlist)
+        response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+        return response
         
     except (NotFoundException, ConflictError, PermissionDenied) as e:
         raise HTTPException(
@@ -176,7 +181,12 @@ async def list_wishlists(
             detail="You do not have permission to view wishlists"
         )
     
-    return [WishlistResponse.model_validate(w) for w in wishlists]
+    responses = []
+    for w in wishlists:
+        response = WishlistResponse.model_validate(w)
+        response.qr_code_url = f"/api/wishlists/{w.id}/qr-code"
+        responses.append(response)
+    return responses
 
 
 @router.get("/{wishlist_id}", response_model=WishlistResponse)
@@ -222,7 +232,9 @@ async def get_wishlist(
             detail="You do not have permission to view this wishlist"
         )
     
-    return WishlistResponse.model_validate(wishlist)
+    response = WishlistResponse.model_validate(wishlist)
+    response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
+    return response
 
 
 @router.put("/{wishlist_id}", response_model=WishlistResponse)
@@ -288,7 +300,9 @@ async def update_wishlist(
         
         await db.commit()
         
-        return WishlistResponse.model_validate(updated_wishlist)
+        response = WishlistResponse.model_validate(updated_wishlist)
+        response.qr_code_url = f"/api/wishlists/{updated_wishlist.id}/qr-code"
+        return response
         
     except NotFoundException as e:
         raise HTTPException(
@@ -355,7 +369,9 @@ async def update_wishlist_products(
         
         await db.commit()
         
-        return WishlistResponse.model_validate(updated_wishlist)
+        response = WishlistResponse.model_validate(updated_wishlist)
+        response.qr_code_url = f"/api/wishlists/{updated_wishlist.id}/qr-code"
+        return response
         
     except NotFoundException as e:
         raise HTTPException(
@@ -405,7 +421,9 @@ async def publish_wishlist(
         published_wishlist = await wishlist_service.publish(wishlist_id, admin_id)
         await db.commit()
         
-        return WishlistResponse.model_validate(published_wishlist)
+        response = WishlistResponse.model_validate(published_wishlist)
+        response.qr_code_url = f"/api/wishlists/{published_wishlist.id}/qr-code"
+        return response
         
     except (ConflictError, PermissionDenied) as e:
         raise HTTPException(
@@ -467,3 +485,61 @@ async def delete_wishlist(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
+
+@router.get("/{wishlist_id}/qr-code")
+async def get_wishlist_qr_code(
+    wishlist_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get QR code for a wishlist.
+    
+    - SUPER_ADMIN: Can get QR for any wishlist
+    - MANAGER: Can get QR for their managed wishlists
+    - ADMIN: Can get QR for their own wishlists
+    
+    Returns a PNG image that redirects to the frontend URL.
+    """
+    wishlist_service = WishlistService(db)
+    wishlist = await wishlist_service.get_by_id(wishlist_id)
+    
+    if not wishlist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wishlist not found"
+        )
+    
+    # Check permissions
+    if current_user.role == UserRole.SUPER_ADMIN.value:
+        pass  # Can view any
+    elif current_user.role == UserRole.MANAGER.value:
+        if wishlist.manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view wishlists you manage"
+            )
+    elif current_user.role == UserRole.ADMIN.value:
+        if wishlist.admin_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view your own wishlists"
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this wishlist"
+        )
+    
+    # Generate QR code for frontend URL
+    frontend_url = f"{settings.frontend_url}/w/{wishlist.public_slug}"
+    qr_buffer = QRCodeService.generate_qr_code(frontend_url)
+    
+    return StreamingResponse(
+        qr_buffer,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"inline; filename=wishlist-{wishlist.public_slug}-qr.png"
+        }
+    )
