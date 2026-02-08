@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    cors_origins: list[str] = ["*"]
     
     @property
     def get_celery_broker_url(self) -> str:
