@@ -27,7 +27,7 @@ async def list_my_wishlists(
 ):
     """List all wishlists for the current admin (ADMIN only)."""
     wishlist_service = WishlistService(db)
-    wishlists = await wishlist_service.get_admin_wishlists(current_user.id)
+    wishlists = await wishlist_service.get_admin_wishlists(current_user.id, load_products=True)
     
     responses = []
     for w in wishlists:
@@ -68,6 +68,9 @@ async def create_my_wishlist(
     )
     
     await db.commit()
+    
+    # Refresh to load products
+    await db.refresh(wishlist, attribute_names=["products"])
     
     response = WishlistResponse.model_validate(wishlist)
     response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
@@ -142,6 +145,9 @@ async def update_my_wishlist(
         )
         
         await db.commit()
+        
+        # Refresh to load products
+        await db.refresh(wishlist, attribute_names=["products"])
         
         response = WishlistResponse.model_validate(wishlist)
         response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
@@ -251,8 +257,8 @@ async def publish_wishlist(
         wishlist = await wishlist_service.publish(wishlist_id, current_user.id)
         await db.commit()
         
-        # Reload wishlist with manager relationship
-        await db.refresh(wishlist, ['manager'])
+        # Reload wishlist with manager and products relationships
+        await db.refresh(wishlist, ['manager', 'products'])
         
         # Send email to manager
         from app.services.email_service import EmailService

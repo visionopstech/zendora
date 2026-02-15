@@ -45,7 +45,9 @@ class WishlistService:
         query = select(Wishlist).where(Wishlist.id == wishlist_id)
         
         if load_products:
-            query = query.options(selectinload(Wishlist.products))
+            query = query.options(
+                selectinload(Wishlist.products).selectinload(WishlistProduct.product)
+            )
         
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
@@ -76,22 +78,28 @@ class WishlistService:
         )
         return result.scalar_one_or_none()
     
-    async def get_admin_wishlists(self, admin_id: UUID) -> List[Wishlist]:
+    async def get_admin_wishlists(self, admin_id: UUID, load_products: bool = False) -> List[Wishlist]:
         """Get all wishlists for an admin."""
-        result = await self.db.execute(
-            select(Wishlist)
-            .where(Wishlist.admin_id == admin_id)
-            .order_by(Wishlist.created_at.desc())
-        )
+        query = select(Wishlist).where(Wishlist.admin_id == admin_id).order_by(Wishlist.created_at.desc())
+        
+        if load_products:
+            query = query.options(
+                selectinload(Wishlist.products).selectinload(WishlistProduct.product)
+            )
+        
+        result = await self.db.execute(query)
         return list(result.scalars().all())
     
-    async def get_manager_wishlists(self, manager_id: UUID) -> List[Wishlist]:
+    async def get_manager_wishlists(self, manager_id: UUID, load_products: bool = False) -> List[Wishlist]:
         """Get all wishlists managed by a manager."""
-        result = await self.db.execute(
-            select(Wishlist)
-            .where(Wishlist.manager_id == manager_id)
-            .order_by(Wishlist.created_at.desc())
-        )
+        query = select(Wishlist).where(Wishlist.manager_id == manager_id).order_by(Wishlist.created_at.desc())
+        
+        if load_products:
+            query = query.options(
+                selectinload(Wishlist.products).selectinload(WishlistProduct.product)
+            )
+        
+        result = await self.db.execute(query)
         return list(result.scalars().all())
     
     async def create(
@@ -390,9 +398,14 @@ class WishlistService:
         await self.db.delete(wishlist)
         await self.db.flush()
     
-    async def get_all(self) -> List[Wishlist]:
+    async def get_all(self, load_products: bool = False) -> List[Wishlist]:
         """Get all wishlists (super admin only)."""
-        result = await self.db.execute(
-            select(Wishlist).order_by(Wishlist.created_at.desc())
-        )
+        query = select(Wishlist).order_by(Wishlist.created_at.desc())
+        
+        if load_products:
+            query = query.options(
+                selectinload(Wishlist.products).selectinload(WishlistProduct.product)
+            )
+        
+        result = await self.db.execute(query)
         return list(result.scalars().all())

@@ -83,6 +83,9 @@ async def create_wishlist(
     
     await db.commit()
     
+    # Refresh to load products
+    await db.refresh(wishlist, attribute_names=["products"])
+    
     response = WishlistResponse.model_validate(wishlist)
     response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
     return response
@@ -95,7 +98,7 @@ async def list_wishlists(
 ):
     """List all wishlists for the current manager (MANAGER only)."""
     wishlist_service = WishlistService(db)
-    wishlists = await wishlist_service.get_manager_wishlists(current_user.id)
+    wishlists = await wishlist_service.get_manager_wishlists(current_user.id, load_products=True)
     
     responses = []
     for w in wishlists:
@@ -145,6 +148,9 @@ async def update_wishlist(
         )
         
         await db.commit()
+        
+        # Refresh to load products
+        await db.refresh(wishlist, attribute_names=["products"])
         
         response = WishlistResponse.model_validate(wishlist)
         response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"

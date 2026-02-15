@@ -1,5 +1,5 @@
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -64,6 +64,31 @@ class WishlistUpdate(BaseModel):
     delivery_address: Optional[DeliveryAddress] = None
 
 
+class ProductInWishlist(BaseModel):
+    """Product as it appears in a wishlist."""
+    id: UUID
+    name: str
+    description: Optional[str]
+    price: float
+    images: List[str] = Field(default_factory=list)
+    quantity: int
+    
+    @classmethod
+    def from_wishlist_product(cls, wp):
+        """Create from WishlistProduct model."""
+        return cls(
+            id=wp.product.id,
+            name=wp.product.name,
+            description=wp.product.description,
+            price=float(wp.product.price),
+            images=wp.product.images if isinstance(wp.product.images, list) else [],
+            quantity=wp.quantity
+        )
+    
+    class Config:
+        from_attributes = True
+
+
 class WishlistResponse(WishlistBase):
     """Schema for wishlist response."""
     id: UUID
@@ -74,19 +99,25 @@ class WishlistResponse(WishlistBase):
     created_at: datetime
     published_at: Optional[datetime] = None
     qr_code_url: Optional[str] = None
+    products: List[ProductInWishlist] = Field(default_factory=list)
     
-    class Config:
-        from_attributes = True
-
-
-class ProductInWishlist(BaseModel):
-    """Product as it appears in a wishlist."""
-    id: UUID
-    name: str
-    description: Optional[str]
-    price: float
-    images: List[str]
-    quantity: int
+    @field_validator('products', mode='before')
+    @classmethod
+    def transform_products(cls, v):
+        """Transform WishlistProduct objects to ProductInWishlist."""
+        if not v:
+            return []
+        
+        # If it's already a list of dicts or ProductInWishlist, return as is
+        if v and isinstance(v[0], (dict, ProductInWishlist)):
+            return v
+        
+        # Transform from WishlistProduct models
+        result = []
+        for wp in v:
+            if hasattr(wp, 'product') and wp.product:
+                result.append(ProductInWishlist.from_wishlist_product(wp))
+        return result
     
     class Config:
         from_attributes = True

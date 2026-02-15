@@ -144,6 +144,9 @@ async def create_wishlist(
         
         await db.commit()
         
+        # Refresh to load products
+        await db.refresh(wishlist, attribute_names=["products"])
+        
         response = WishlistResponse.model_validate(wishlist)
         response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"
         return response
@@ -170,11 +173,11 @@ async def list_wishlists(
     wishlist_service = WishlistService(db)
     
     if current_user.role == UserRole.SUPER_ADMIN.value:
-        wishlists = await wishlist_service.get_all()
+        wishlists = await wishlist_service.get_all(load_products=True)
     elif current_user.role == UserRole.MANAGER.value:
-        wishlists = await wishlist_service.get_manager_wishlists(current_user.id)
+        wishlists = await wishlist_service.get_manager_wishlists(current_user.id, load_products=True)
     elif current_user.role == UserRole.ADMIN.value:
-        wishlists = await wishlist_service.get_admin_wishlists(current_user.id)
+        wishlists = await wishlist_service.get_admin_wishlists(current_user.id, load_products=True)
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -203,7 +206,7 @@ async def get_wishlist(
     - ADMIN: Can view their own wishlists
     """
     wishlist_service = WishlistService(db)
-    wishlist = await wishlist_service.get_by_id(wishlist_id)
+    wishlist = await wishlist_service.get_by_id(wishlist_id, load_products=True)
     
     if not wishlist:
         raise HTTPException(
@@ -300,6 +303,9 @@ async def update_wishlist(
         
         await db.commit()
         
+        # Refresh to load products
+        await db.refresh(updated_wishlist, attribute_names=["products"])
+        
         response = WishlistResponse.model_validate(updated_wishlist)
         response.qr_code_url = f"/api/wishlists/{updated_wishlist.id}/qr-code"
         return response
@@ -369,6 +375,9 @@ async def update_wishlist_products(
         
         await db.commit()
         
+        # Refresh to load products (already loaded by update_products)
+        await db.refresh(updated_wishlist, attribute_names=["products"])
+        
         response = WishlistResponse.model_validate(updated_wishlist)
         response.qr_code_url = f"/api/wishlists/{updated_wishlist.id}/qr-code"
         return response
@@ -420,6 +429,9 @@ async def publish_wishlist(
     try:
         published_wishlist = await wishlist_service.publish(wishlist_id, admin_id)
         await db.commit()
+        
+        # Refresh to load products
+        await db.refresh(published_wishlist, attribute_names=["products"])
         
         response = WishlistResponse.model_validate(published_wishlist)
         response.qr_code_url = f"/api/wishlists/{published_wishlist.id}/qr-code"
