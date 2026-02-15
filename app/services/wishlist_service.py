@@ -44,6 +44,12 @@ class WishlistService:
         """Get wishlist by ID."""
         query = select(Wishlist).where(Wishlist.id == wishlist_id)
         
+        # Always load settings relationships
+        query = query.options(
+            selectinload(Wishlist.settings),
+            selectinload(Wishlist.manager).selectinload(User.manager_settings)
+        )
+        
         if load_products:
             query = query.options(
                 selectinload(Wishlist.products).selectinload(WishlistProduct.product)
@@ -59,6 +65,12 @@ class WishlistService:
     ) -> Optional[Wishlist]:
         """Get wishlist by public slug."""
         query = select(Wishlist).where(Wishlist.public_slug == public_slug)
+        
+        # Always load settings relationships
+        query = query.options(
+            selectinload(Wishlist.settings),
+            selectinload(Wishlist.manager).selectinload(User.manager_settings)
+        )
         
         if load_products:
             query = query.options(
@@ -82,6 +94,12 @@ class WishlistService:
         """Get all wishlists for an admin."""
         query = select(Wishlist).where(Wishlist.admin_id == admin_id).order_by(Wishlist.created_at.desc())
         
+        # Always load settings relationships
+        query = query.options(
+            selectinload(Wishlist.settings),
+            selectinload(Wishlist.manager).selectinload(User.manager_settings)
+        )
+        
         if load_products:
             query = query.options(
                 selectinload(Wishlist.products).selectinload(WishlistProduct.product)
@@ -93,6 +111,12 @@ class WishlistService:
     async def get_manager_wishlists(self, manager_id: UUID, load_products: bool = False) -> List[Wishlist]:
         """Get all wishlists managed by a manager."""
         query = select(Wishlist).where(Wishlist.manager_id == manager_id).order_by(Wishlist.created_at.desc())
+        
+        # Always load settings relationships
+        query = query.options(
+            selectinload(Wishlist.settings),
+            selectinload(Wishlist.manager).selectinload(User.manager_settings)
+        )
         
         if load_products:
             query = query.options(
@@ -401,6 +425,12 @@ class WishlistService:
     async def get_all(self, load_products: bool = False) -> List[Wishlist]:
         """Get all wishlists (super admin only)."""
         query = select(Wishlist).order_by(Wishlist.created_at.desc())
+        
+        # Always load settings relationships
+        query = query.options(
+            selectinload(Wishlist.settings),
+            selectinload(Wishlist.manager).selectinload(User.manager_settings)
+        )
         
         if load_products:
             query = query.options(

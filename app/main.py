@@ -130,7 +130,7 @@ async def root():
 
 
 # Import and include routers
-from app.api import auth, admin, manager, admin_wishlist, wishlist_public, checkout, webhooks, tasks, vendors, products, users, orders, wishlists
+from app.api import auth, admin, manager, admin_wishlist, wishlist_public, checkout, webhooks, tasks, vendors, products, users, orders, wishlists, manager_settings, wishlist_settings
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(vendors.router, prefix="/api/vendors", tags=["Vendors"])
@@ -140,6 +140,8 @@ app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(wishlists.router, prefix="/api/wishlists", tags=["Wishlists"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
 app.include_router(manager.router, prefix="/manager", tags=["Manager - Wishlists"])
+app.include_router(manager_settings.router, prefix="/api", tags=["Manager - Settings"])
+app.include_router(wishlist_settings.router, prefix="/api", tags=["Wishlist Settings"])
 app.include_router(admin_wishlist.router, prefix="/admin", tags=["Admin - Wishlists"])
 app.include_router(wishlist_public.router, prefix="/w", tags=["Public Wishlist"])
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])

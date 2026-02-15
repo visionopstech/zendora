@@ -1,9 +1,11 @@
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from sqlalchemy.inspection import inspect as sa_inspect
 
 from app.models.wishlist import WishlistStatus
+from app.schemas.settings import CombinedSettingsResponse, ManagerSettingsResponse, WishlistSettingsResponse
 
 
 class DeliveryAddress(BaseModel):
@@ -100,6 +102,7 @@ class WishlistResponse(WishlistBase):
     published_at: Optional[datetime] = None
     qr_code_url: Optional[str] = None
     products: List[ProductInWishlist] = Field(default_factory=list)
+    settings: CombinedSettingsResponse = Field(default_factory=lambda: CombinedSettingsResponse(manager=None, wishlist=None))
     
     @field_validator('products', mode='before')
     @classmethod
@@ -115,9 +118,53 @@ class WishlistResponse(WishlistBase):
         # Transform from WishlistProduct models
         result = []
         for wp in v:
-            if hasattr(wp, 'product') and wp.product:
-                result.append(ProductInWishlist.from_wishlist_product(wp))
+            # Check if product relationship is loaded to avoid lazy loading
+            state = sa_inspect(wp)
+            if 'product' not in state.unloaded:
+                if hasattr(wp, 'product') and wp.product:
+                    result.append(ProductInWishlist.from_wishlist_product(wp))
         return result
+    
+    @model_validator(mode='before')
+    @classmethod
+    def build_settings(cls, data):
+        """Build combined settings from the wishlist model."""
+        # If data is a dict (already validated), return as is
+        if isinstance(data, dict):
+            return data
+        
+        # data is a Wishlist model instance
+        manager_settings = None
+        wishlist_settings = None
+        
+        # Check if relationships are loaded to avoid lazy loading
+        if hasattr(data, '__dict__'):
+            # Use SQLAlchemy inspect to check if relationship is loaded
+            state = sa_inspect(data)
+            
+            # Check if manager relationship is loaded
+            if 'manager' not in state.unloaded:
+                if hasattr(data, 'manager') and data.manager:
+                    # Check if manager_settings is loaded on the manager
+                    manager_state = sa_inspect(data.manager)
+                    if 'manager_settings' not in manager_state.unloaded:
+                        if hasattr(data.manager, 'manager_settings') and data.manager.manager_settings:
+                            manager_settings = ManagerSettingsResponse.model_validate(data.manager.manager_settings)
+            
+            # Check if settings relationship is loaded
+            if 'settings' not in state.unloaded:
+                if hasattr(data, 'settings') and data.settings:
+                    wishlist_settings = WishlistSettingsResponse.model_validate(data.settings)
+            
+            # Convert model to dict and add settings
+            result = {key: getattr(data, key) for key in data.__dict__ if not key.startswith('_')}
+            result['settings'] = CombinedSettingsResponse(
+                manager=manager_settings,
+                wishlist=wishlist_settings
+            )
+            return result
+        
+        return data
     
     class Config:
         from_attributes = True
@@ -131,6 +178,48 @@ class WishlistPublicResponse(BaseModel):
     customization: WishlistCustomization
     products: List[ProductInWishlist]
     qr_code_url: Optional[str] = None
+    settings: CombinedSettingsResponse = Field(default_factory=lambda: CombinedSettingsResponse(manager=None, wishlist=None))
+    
+    @model_validator(mode='before')
+    @classmethod
+    def build_settings(cls, data):
+        """Build combined settings from the wishlist model."""
+        # If data is a dict (already validated), return as is
+        if isinstance(data, dict):
+            return data
+        
+        # data is a Wishlist model instance
+        manager_settings = None
+        wishlist_settings = None
+        
+        # Check if relationships are loaded to avoid lazy loading
+        if hasattr(data, '__dict__'):
+            # Use SQLAlchemy inspect to check if relationship is loaded
+            state = sa_inspect(data)
+            
+            # Check if manager relationship is loaded
+            if 'manager' not in state.unloaded:
+                if hasattr(data, 'manager') and data.manager:
+                    # Check if manager_settings is loaded on the manager
+                    manager_state = sa_inspect(data.manager)
+                    if 'manager_settings' not in manager_state.unloaded:
+                        if hasattr(data.manager, 'manager_settings') and data.manager.manager_settings:
+                            manager_settings = ManagerSettingsResponse.model_validate(data.manager.manager_settings)
+            
+            # Check if settings relationship is loaded
+            if 'settings' not in state.unloaded:
+                if hasattr(data, 'settings') and data.settings:
+                    wishlist_settings = WishlistSettingsResponse.model_validate(data.settings)
+            
+            # Convert model to dict and add settings
+            result = {key: getattr(data, key) for key in data.__dict__ if not key.startswith('_')}
+            result['settings'] = CombinedSettingsResponse(
+                manager=manager_settings,
+                wishlist=wishlist_settings
+            )
+            return result
+        
+        return data
 
 
 class AddProductsRequest(BaseModel):

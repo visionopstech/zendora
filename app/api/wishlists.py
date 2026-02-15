@@ -144,8 +144,8 @@ async def create_wishlist(
         
         await db.commit()
         
-        # Refresh to load products
-        await db.refresh(wishlist, attribute_names=["products"])
+        # Fetch the wishlist again with all relationships loaded
+        wishlist = await wishlist_service.get_by_id(wishlist.id, load_products=True)
         
         response = WishlistResponse.model_validate(wishlist)
         response.qr_code_url = f"/api/wishlists/{wishlist.id}/qr-code"

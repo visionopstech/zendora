@@ -98,6 +98,14 @@ class Wishlist(Base):
         back_populates="wishlist"
     )
     
+    # Wishlist-specific settings
+    settings: Mapped[Optional["WishlistSettings"]] = relationship(
+        "WishlistSettings",
+        back_populates="wishlist",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    
     def __repr__(self) -> str:
         return f"<Wishlist(id={self.id}, title={self.title}, status={self.status})>"
 
