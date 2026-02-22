@@ -72,6 +72,11 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
 
 
+class ProfileUpdate(BaseModel):
+    """Schema for authenticated user to update their own profile. Only full_name is updatable via this endpoint."""
+    full_name: Optional[str] = None
+
+
 class UserManagementUpdate(BaseModel):
     """Schema for updating user (management operations)."""
     email: Optional[EmailStr] = None

@@ -6,7 +6,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.models.user import User, UserRole
 from app.dependencies.auth import get_current_user, require_super_admin
-from app.schemas.user import UserCreate, UserManagementUpdate, UserResponse
+from app.schemas.user import UserCreate, UserManagementUpdate, UserResponse, ProfileUpdate
 from app.services.user_management_service import UserManagementService
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
@@ -89,6 +89,27 @@ async def list_users(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to list users"
     )
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_my_profile(
+    user_data: ProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update the authenticated user's own profile.
+
+    Allows any authenticated user to update their full name. Only full_name is
+    updatable via this endpoint.
+    """
+    user_service = UserManagementService(db)
+    user = await user_service.update(
+        user_id=current_user.id,
+        full_name=user_data.full_name
+    )
+    await db.commit()
+    return UserResponse.model_validate(user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
