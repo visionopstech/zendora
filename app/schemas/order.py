@@ -41,6 +41,9 @@ class OrderResponse(BaseModel):
     created_at: datetime
     paid_at: Optional[datetime] = None
     products: List[OrderProductResponse] = Field(default_factory=list)
+    # Vendor-specific: products from their vendor and total for those products
+    vendor_products: Optional[List[OrderProductResponse]] = None
+    vendor_sales_amount: Optional[Decimal] = None
     
     class Config:
         from_attributes = True

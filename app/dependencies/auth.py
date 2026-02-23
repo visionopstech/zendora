@@ -87,6 +87,17 @@ require_super_admin = require_role(UserRole.SUPER_ADMIN)
 require_manager = require_role(UserRole.MANAGER)
 require_admin = require_role(UserRole.ADMIN)
 require_manager_or_admin = require_role(UserRole.MANAGER, UserRole.ADMIN)
+require_vendor = require_role(UserRole.VENDOR)
+
+
+async def require_vendor_with_entity(current_user: User = Depends(require_vendor)) -> User:
+    """
+    Dependency that requires VENDOR role and ensures the user has a vendor_id.
+    Use for endpoints that need to access the vendor entity.
+    """
+    if not current_user.vendor_id:
+        raise PermissionDenied("Vendor user must be linked to a vendor entity")
+    return current_user
 
 
 async def get_optional_current_user(

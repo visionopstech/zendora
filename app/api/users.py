@@ -33,7 +33,8 @@ async def create_user(
             password=user_data.password,
             role=user_data.role,
             full_name=user_data.full_name,
-            manager_id=user_data.manager_id
+            manager_id=user_data.manager_id,
+            vendor_id=user_data.vendor_id
         )
         
         await db.commit()
@@ -82,6 +83,10 @@ async def list_users(
     
     # Admin can only see themselves
     if current_user.role == UserRole.ADMIN.value:
+        return [UserResponse.model_validate(current_user)]
+    
+    # Vendor can only see themselves
+    if current_user.role == UserRole.VENDOR.value:
         return [UserResponse.model_validate(current_user)]
     
     # Other roles have no access
@@ -156,6 +161,15 @@ async def get_user(
             detail="You can only view your own profile"
         )
     
+    # Vendor can only see themselves
+    if current_user.role == UserRole.VENDOR.value:
+        if user.id == current_user.id:
+            return UserResponse.model_validate(user)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own profile"
+        )
+    
     # Other roles have no access
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -187,6 +201,7 @@ async def update_user(
             role=user_data.role,
             is_active=user_data.is_active,
             manager_id=user_data.manager_id,
+            vendor_id=user_data.vendor_id,
             password=user_data.password
         )
         

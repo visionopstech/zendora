@@ -25,7 +25,7 @@ class UserAdmin(ModelView, model=User):
     # List page configuration
     column_list = [
         User.id, User.email, User.full_name, User.role,
-        User.is_active, User.manager_id, User.created_at
+        User.is_active, User.manager_id, User.vendor_id, User.created_at
     ]
     column_searchable_list = [User.email, User.full_name]
     column_sortable_list = [User.email, User.role, User.is_active, User.created_at]
@@ -34,18 +34,10 @@ class UserAdmin(ModelView, model=User):
     # Filters
     column_filters = [User.role, User.is_active, User.created_at]
     
-    # AJAX references for relationships
-    form_ajax_refs = {
-        "manager": {
-            "fields": ("email", "full_name"),
-            "order_by": "email",
-        }
-    }
-    
     # Detail/Edit page configuration
     form_columns = [
         User.email, User.full_name, User.role,
-        User.is_active, User.manager
+        User.is_active, User.manager, User.vendor
     ]
     
     # Custom formatters
@@ -54,6 +46,7 @@ class UserAdmin(ModelView, model=User):
         User.is_active: lambda m, a: format_boolean(m.is_active),
         User.created_at: lambda m, a: format_datetime(m.created_at),
         User.manager_id: lambda m, a: format_uuid(m.manager_id) if m.manager_id else "",
+        User.vendor_id: lambda m, a: format_uuid(m.vendor_id) if m.vendor_id else "",
     }
     
     # Form overrides for enum field
@@ -80,6 +73,8 @@ class UserAdmin(ModelView, model=User):
         User.is_active: "Active",
         User.manager_id: "Manager ID",
         User.manager: "Manager",
+        User.vendor_id: "Vendor ID",
+        User.vendor: "Vendor",
         User.created_at: "Created At",
         User.updated_at: "Updated At",
     }
@@ -291,18 +286,6 @@ class WishlistAdmin(ModelView, model=Wishlist):
     # Filters
     column_filters = [Wishlist.status, Wishlist.created_at, Wishlist.published_at]
     
-    # AJAX references for relationships (better UX with many records)
-    form_ajax_refs = {
-        "admin": {
-            "fields": ("email", "full_name"),
-            "order_by": "email",
-        },
-        "manager": {
-            "fields": ("email", "full_name"),
-            "order_by": "email",
-        }
-    }
-    
     # Detail/Edit page configuration
     form_columns = [
         Wishlist.admin, Wishlist.manager, Wishlist.public_slug,
@@ -428,22 +411,6 @@ class OrderAdmin(ModelView, model=Order):
     # Filters
     column_filters = [Order.status, Order.currency, Order.created_at, Order.paid_at]
     
-    # AJAX references for relationships (better UX with many records)
-    form_ajax_refs = {
-        "visitor": {
-            "fields": ("email", "full_name"),
-            "order_by": "email",
-        },
-        "wishlist": {
-            "fields": ("title", "public_slug"),
-            "order_by": "title",
-        },
-        "admin": {
-            "fields": ("email", "full_name"),
-            "order_by": "email",
-        }
-    }
-    
     # Detail/Edit page configuration
     form_columns = [
         Order.visitor, Order.wishlist, Order.admin,
@@ -533,20 +500,6 @@ class ProductVendorAdmin(ModelView, model=ProductVendor):
         ProductVendor.vendor: lambda m, a: m.vendor.name if m.vendor else "Unknown",
     }
     
-    # AJAX references for relationships
-    form_ajax_refs = {
-        "product": {
-            "fields": ("name",),
-            "order_by": "name",
-            "page_size": 10,
-        },
-        "vendor": {
-            "fields": ("name",),
-            "order_by": "name",
-            "page_size": 10,
-        }
-    }
-    
     # Detail/Edit page configuration
     form_columns = [
         ProductVendor.product, ProductVendor.vendor
@@ -596,20 +549,6 @@ class WishlistProductAdmin(ModelView, model=WishlistProduct):
     column_formatters = {
         WishlistProduct.wishlist: lambda m, a: m.wishlist.title if m.wishlist else "Unknown",
         WishlistProduct.product: lambda m, a: m.product.name if m.product else "Unknown",
-    }
-    
-    # AJAX references for relationships
-    form_ajax_refs = {
-        "wishlist": {
-            "fields": ("title", "public_slug"),
-            "order_by": "title",
-            "page_size": 10,
-        },
-        "product": {
-            "fields": ("name",),
-            "order_by": "name",
-            "page_size": 10,
-        }
     }
     
     # Detail/Edit page configuration
@@ -671,20 +610,6 @@ class OrderProductAdmin(ModelView, model=OrderProduct):
         OrderProduct.order: lambda m, a: f"Order {str(m.order_id)[:8]}..." if m.order else "Unknown",
         OrderProduct.product: lambda m, a: m.product.name if m.product else m.product_name,
         OrderProduct.product_price: lambda m, a: format_price(m, a, attr_name="product_price"),
-    }
-    
-    # AJAX references for relationships
-    form_ajax_refs = {
-        "order": {
-            "fields": ("stripe_session_id",),
-            "order_by": "created_at",
-            "page_size": 10,
-        },
-        "product": {
-            "fields": ("name",),
-            "order_by": "name",
-            "page_size": 10,
-        }
     }
     
     # Detail/Edit page configuration

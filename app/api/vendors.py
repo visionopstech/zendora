@@ -4,13 +4,31 @@ from uuid import UUID
 from typing import List
 
 from app.core.database import get_db
-from app.models.user import User
-from app.dependencies.auth import require_super_admin
+from app.models.user import User, UserRole
+from app.dependencies.auth import require_super_admin, require_vendor_with_entity
 from app.schemas.vendor import VendorCreate, VendorUpdate, VendorResponse
 from app.services.vendor_service import VendorService
 from app.core.exceptions import NotFoundException
 
 router = APIRouter()
+
+
+@router.get("/me", response_model=VendorResponse)
+async def get_my_vendor(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_vendor_with_entity)
+):
+    """Get the authenticated vendor user's vendor entity (VENDOR role only)."""
+    vendor_service = VendorService(db)
+    vendor = await vendor_service.get_by_id(current_user.vendor_id)
+    
+    if not vendor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vendor not found"
+        )
+    
+    return VendorResponse.model_validate(vendor)
 
 
 @router.post("", response_model=VendorResponse, status_code=status.HTTP_201_CREATED)

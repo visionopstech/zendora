@@ -4,8 +4,9 @@ from uuid import UUID
 from typing import List
 
 from app.core.database import get_db
-from app.models.user import User
-from app.dependencies.auth import require_super_admin
+from app.models.user import User, UserRole
+from app.dependencies.auth import require_super_admin, get_current_user, require_vendor_with_entity
+from app.core.exceptions import PermissionDenied
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -19,38 +20,66 @@ from app.core.exceptions import NotFoundException
 router = APIRouter()
 
 
+def _require_super_admin_or_vendor(current_user: User = Depends(get_current_user)) -> User:
+    """Allow SUPER_ADMIN or VENDOR (with vendor_id) to access."""
+    if current_user.role == UserRole.SUPER_ADMIN.value:
+        return current_user
+    if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+        return current_user
+    raise PermissionDenied("This action requires SUPER_ADMIN or VENDOR role")
+
+
 @router.post("", response_model=ProductWithVendors, status_code=status.HTTP_201_CREATED)
 async def create_product(
     product_data: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
     """
-    Create a new product (SUPER_ADMIN only).
+    Create a new product.
     
-    Optionally associate vendors with the product in a single operation
-    by providing vendor_ids in the request body.
+    SUPER_ADMIN: Can create with any vendors (or none).
+    VENDOR: Creates product and automatically associates with their vendor.
     """
     product_service = ProductService(db)
     
     try:
+        vendor_ids = list(product_data.vendor_ids) if product_data.vendor_ids else []
+        
+        # Vendor users can only associate their own vendor
+        if current_user.role == UserRole.VENDOR.value:
+            if current_user.vendor_id not in vendor_ids:
+                vendor_ids.append(current_user.vendor_id)
+            # Vendor can only add their vendor, not others
+            vendor_ids = [vid for vid in vendor_ids if vid == current_user.vendor_id]
+        
         # If vendor_ids provided, create product with vendors
-        if product_data.vendor_ids:
+        if vendor_ids:
             product = await product_service.create_with_vendors(
                 name=product_data.name,
                 description=product_data.description,
                 price=product_data.price,
                 images=product_data.images,
-                vendor_ids=product_data.vendor_ids
+                vendor_ids=vendor_ids
             )
         else:
-            # Otherwise, create product without vendors
-            product = await product_service.create(
-                name=product_data.name,
-                description=product_data.description,
-                price=product_data.price,
-                images=product_data.images
-            )
+            # Super admin can create without vendors; vendor must have their vendor
+            if current_user.role == UserRole.VENDOR.value:
+                vendor_ids = [current_user.vendor_id]
+                product = await product_service.create_with_vendors(
+                    name=product_data.name,
+                    description=product_data.description,
+                    price=product_data.price,
+                    images=product_data.images,
+                    vendor_ids=vendor_ids
+                )
+            else:
+                product = await product_service.create(
+                    name=product_data.name,
+                    description=product_data.description,
+                    price=product_data.price,
+                    images=product_data.images
+                )
         
         await db.commit()
         
@@ -71,11 +100,16 @@ async def create_product(
 async def list_products(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
-    """List all products with vendor IDs (SUPER_ADMIN only)."""
+    """List products. SUPER_ADMIN: all products. VENDOR: only their vendor's products."""
     product_service = ProductService(db)
-    products = await product_service.get_all(include_inactive=include_inactive, load_vendors=True)
+    vendor_id = current_user.vendor_id if current_user.role == UserRole.VENDOR.value else None
+    products = await product_service.get_all(
+        include_inactive=include_inactive,
+        load_vendors=True,
+        vendor_id=vendor_id
+    )
     
     # Build response with vendor IDs for each product
     result = []
@@ -93,9 +127,9 @@ async def list_products(
 async def get_product(
     product_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
-    """Get product by ID with vendors (SUPER_ADMIN only)."""
+    """Get product by ID. VENDOR: only if product belongs to their vendor."""
     product_service = ProductService(db)
     product = await product_service.get_by_id(product_id, load_vendors=True)
     
@@ -104,6 +138,15 @@ async def get_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
+    
+    # Vendor can only see products from their vendor
+    if current_user.role == UserRole.VENDOR.value:
+        belongs = await product_service.product_belongs_to_vendor(product_id, current_user.vendor_id)
+        if not belongs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
     
     vendor_ids = [assoc.vendor_id for assoc in product.vendor_associations]
     
@@ -119,19 +162,25 @@ async def update_product(
     product_id: UUID,
     product_data: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
     """
-    Update product (SUPER_ADMIN only).
+    Update product. VENDOR: only products from their vendor.
     
     Supports both PUT and PATCH methods for partial updates.
-    Only provide the fields you want to update.
-    
-    If vendor_ids is provided, it will replace all existing vendor associations.
+    If vendor_ids is provided (SUPER_ADMIN only), it replaces vendor associations.
     """
     product_service = ProductService(db)
     
     try:
+        # Vendor can only update products from their vendor
+        if current_user.role == UserRole.VENDOR.value:
+            belongs = await product_service.product_belongs_to_vendor(product_id, current_user.vendor_id)
+            if not belongs:
+                raise NotFoundException("Product not found")
+            # Vendor cannot change vendor associations
+            product_data.vendor_ids = None
+        
         # Update basic product fields
         product = await product_service.update(
             product_id=product_id,
@@ -171,16 +220,23 @@ async def associate_product_vendors(
     product_id: UUID,
     request: AssociateVendorsRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
-    """Associate vendors with a product (SUPER_ADMIN only)."""
+    """Associate vendors with a product. SUPER_ADMIN: replaces all. VENDOR: adds their vendor only."""
     product_service = ProductService(db)
     
     try:
-        product = await product_service.associate_vendors(
-            product_id=product_id,
-            vendor_ids=request.vendor_ids
-        )
+        if current_user.role == UserRole.VENDOR.value:
+            # Vendor can only add their vendor to a product (does not replace existing)
+            product = await product_service.add_vendor_to_product(
+                product_id=product_id,
+                vendor_id=current_user.vendor_id
+            )
+        else:
+            product = await product_service.associate_vendors(
+                product_id=product_id,
+                vendor_ids=request.vendor_ids
+            )
         
         await db.commit()
         
@@ -201,12 +257,16 @@ async def associate_product_vendors(
 async def delete_product(
     product_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(_require_super_admin_or_vendor)
 ):
-    """Delete product (SUPER_ADMIN only)."""
+    """Delete product. VENDOR: only products from their vendor."""
     product_service = ProductService(db)
     
     try:
+        if current_user.role == UserRole.VENDOR.value:
+            belongs = await product_service.product_belongs_to_vendor(product_id, current_user.vendor_id)
+            if not belongs:
+                raise NotFoundException("Product not found")
         await product_service.delete(product_id)
         await db.commit()
     except NotFoundException as e:

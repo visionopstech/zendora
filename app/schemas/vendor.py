@@ -33,3 +33,10 @@ class VendorResponse(VendorBase):
     
     class Config:
         from_attributes = True
+
+
+class VendorDashboardStats(BaseModel):
+    """Schema for vendor dashboard statistics."""
+    product_count: int
+    total_sales_amount: Decimal
+    order_count: int

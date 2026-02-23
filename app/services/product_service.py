@@ -26,12 +26,24 @@ class ProductService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
     
-    async def get_all(self, include_inactive: bool = False, load_vendors: bool = False) -> List[Product]:
-        """Get all products."""
+    async def get_all(
+        self,
+        include_inactive: bool = False,
+        load_vendors: bool = False,
+        vendor_id: Optional[UUID] = None
+    ) -> List[Product]:
+        """Get all products, optionally filtered by vendor."""
         query = select(Product)
         
         if load_vendors:
             query = query.options(selectinload(Product.vendor_associations))
+        
+        # Use subquery for vendor filter (avoids JOIN+DISTINCT which fails on json columns)
+        if vendor_id is not None:
+            vendor_product_ids = select(ProductVendor.product_id).where(
+                ProductVendor.vendor_id == vendor_id
+            )
+            query = query.where(Product.id.in_(vendor_product_ids))
         
         if not include_inactive:
             query = query.where(Product.is_active == True)
@@ -210,3 +222,34 @@ class ProductService:
             .order_by(Vendor.name)
         )
         return list(result.scalars().all())
+    
+    async def product_belongs_to_vendor(self, product_id: UUID, vendor_id: UUID) -> bool:
+        """Check if a product is associated with a vendor."""
+        result = await self.db.execute(
+            select(ProductVendor).where(
+                ProductVendor.product_id == product_id,
+                ProductVendor.vendor_id == vendor_id
+            )
+        )
+        return result.scalar_one_or_none() is not None
+    
+    async def add_vendor_to_product(self, product_id: UUID, vendor_id: UUID) -> Product:
+        """Add a vendor association to a product (without removing existing)."""
+        product = await self.get_by_id(product_id)
+        if not product:
+            raise NotFoundException("Product not found")
+        
+        # Check if already associated
+        if await self.product_belongs_to_vendor(product_id, vendor_id):
+            return product
+        
+        # Verify vendor exists
+        result = await self.db.execute(select(Vendor).where(Vendor.id == vendor_id))
+        if not result.scalar_one_or_none():
+            raise NotFoundException("Vendor not found")
+        
+        association = ProductVendor(product_id=product_id, vendor_id=vendor_id)
+        self.db.add(association)
+        await self.db.flush()
+        await self.db.refresh(product, attribute_names=["vendor_associations"])
+        return product

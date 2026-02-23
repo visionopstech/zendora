@@ -7,7 +7,7 @@ from decimal import Decimal
 from datetime import datetime
 
 from app.models.order import Order, OrderProduct, OrderStatus
-from app.models.product import Product
+from app.models.product import Product, ProductVendor
 from app.models.wishlist import Wishlist
 from app.core.exceptions import NotFoundException
 
@@ -200,6 +200,87 @@ class OrderService:
             .order_by(Order.created_at.desc())
         )
         return list(result.scalars().all())
+    
+    async def get_vendor_orders(
+        self,
+        vendor_id: UUID,
+        status: Optional[OrderStatus] = None
+    ) -> List[Order]:
+        """Get orders that contain at least one product from the vendor."""
+        # Subquery: product_ids that belong to this vendor
+        vendor_product_ids = (
+            select(ProductVendor.product_id)
+            .where(ProductVendor.vendor_id == vendor_id)
+        )
+        # Orders that have order_products with those product_ids
+        query = (
+            select(Order)
+            .join(OrderProduct, Order.id == OrderProduct.order_id)
+            .where(OrderProduct.product_id.in_(vendor_product_ids))
+            .order_by(Order.created_at.desc())
+            .distinct()
+        )
+        if status:
+            query = query.where(Order.status == status.value)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_vendor_order_stats(
+        self,
+        vendor_id: UUID
+    ) -> tuple[int, Decimal]:
+        """
+        Get vendor sales stats: (product_count, total_sales_amount).
+        product_count: number of distinct products from this vendor
+        total_sales_amount: sum of (price * quantity) for vendor's products in PAID orders
+        """
+        from sqlalchemy import func
+        
+        # Product count: distinct products associated with vendor
+        product_count_result = await self.db.execute(
+            select(func.count(ProductVendor.product_id))
+            .where(ProductVendor.vendor_id == vendor_id)
+        )
+        product_count = product_count_result.scalar() or 0
+        
+        # Total sales: sum of (product_price * quantity) for order_products where
+        # product belongs to vendor and order is PAID
+        vendor_product_ids = (
+            select(ProductVendor.product_id)
+            .where(ProductVendor.vendor_id == vendor_id)
+        )
+        sales_result = await self.db.execute(
+            select(func.coalesce(func.sum(OrderProduct.product_price * OrderProduct.quantity), 0))
+            .join(Order, OrderProduct.order_id == Order.id)
+            .where(
+                OrderProduct.product_id.in_(vendor_product_ids),
+                Order.status == OrderStatus.PAID.value
+            )
+        )
+        total_sales = sales_result.scalar() or 0
+        
+        return (product_count, total_sales)
+    
+    async def get_order_vendor_products(
+        self,
+        order_id: UUID,
+        vendor_id: UUID
+    ) -> tuple[list[OrderProduct], Decimal]:
+        """
+        Get order products that belong to a vendor and the total sales amount.
+        Returns (list of OrderProduct, total amount for vendor's products).
+        """
+        result = await self.db.execute(
+            select(OrderProduct)
+            .join(ProductVendor, OrderProduct.product_id == ProductVendor.product_id)
+            .where(
+                OrderProduct.order_id == order_id,
+                ProductVendor.vendor_id == vendor_id
+            )
+        )
+        vendor_order_products = list(result.scalars().all())
+        total = sum(op.product_price * op.quantity for op in vendor_order_products)
+        return (vendor_order_products, total)
     
     async def update(
         self,

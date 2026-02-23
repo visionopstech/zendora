@@ -45,5 +45,12 @@ class Vendor(Base):
         cascade="all, delete-orphan"
     )
     
+    # Vendor users (users with VENDOR role linked to this vendor)
+    vendor_users: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="vendor",
+        foreign_keys="User.vendor_id"
+    )
+    
     def __repr__(self) -> str:
         return f"<Vendor(id={self.id}, name={self.name})>"

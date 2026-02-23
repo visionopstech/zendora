@@ -8,10 +8,45 @@ from app.models.user import User, UserRole
 from app.models.order import OrderStatus
 from app.dependencies.auth import get_current_user, require_super_admin
 from app.schemas.order import OrderResponse, OrderUpdate, OrderProductResponse
+from app.schemas.vendor import VendorDashboardStats
 from app.services.order_service import OrderService
 from app.core.exceptions import NotFoundException
 
 router = APIRouter()
+
+
+@router.get("/vendor/dashboard", response_model=VendorDashboardStats)
+async def get_vendor_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get vendor dashboard stats: product count, total sales, order count.
+    VENDOR role only.
+    """
+    if current_user.role != UserRole.VENDOR.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is for vendor users only"
+        )
+    if not current_user.vendor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vendor user must be linked to a vendor entity"
+        )
+    
+    order_service = OrderService(db)
+    product_count, total_sales = await order_service.get_vendor_order_stats(
+        current_user.vendor_id
+    )
+    orders = await order_service.get_vendor_orders(current_user.vendor_id)
+    order_count = len(orders)
+    
+    return VendorDashboardStats(
+        product_count=product_count,
+        total_sales_amount=total_sales,
+        order_count=order_count
+    )
 
 
 @router.get("", response_model=List[OrderResponse])
@@ -27,6 +62,7 @@ async def list_orders(
     - MANAGER: Can view orders for their managed wishlists
     - ADMIN: Can view orders for their wishlists
     - VISITOR: Can view their own orders
+    - VENDOR: Can view orders containing their vendor's products
     """
     order_service = OrderService(db)
     
@@ -48,6 +84,14 @@ async def list_orders(
         orders = await order_service.get_visitor_orders(current_user.id)
         if status:
             orders = [o for o in orders if o.status == status.value]
+    # Vendor can see orders containing their products
+    elif current_user.role == UserRole.VENDOR.value:
+        if not current_user.vendor_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vendor user must be linked to a vendor entity"
+            )
+        orders = await order_service.get_vendor_orders(current_user.vendor_id, status=status)
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -71,6 +115,23 @@ async def list_orders(
         
         order_data = OrderResponse.model_validate(order_with_products).model_dump()
         order_data["products"] = products
+        
+        # For vendor users, add vendor_products and vendor_sales_amount
+        if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+            vendor_products, vendor_amount = await order_service.get_order_vendor_products(
+                order.id, current_user.vendor_id
+            )
+            order_data["vendor_products"] = [
+                OrderProductResponse(
+                    product_id=op.product_id,
+                    product_name=op.product_name,
+                    product_price=op.product_price,
+                    quantity=op.quantity
+                )
+                for op in vendor_products
+            ]
+            order_data["vendor_sales_amount"] = vendor_amount
+        
         result.append(OrderResponse(**order_data))
     
     return result
@@ -89,6 +150,7 @@ async def get_order(
     - MANAGER: Can view orders for their managed wishlists
     - ADMIN: Can view orders for their wishlists
     - VISITOR: Can view their own orders
+    - VENDOR: Can view orders containing their vendor's products
     """
     order_service = OrderService(db)
     order = await order_service.get_by_id(order_id, load_products=True)
@@ -124,6 +186,21 @@ async def get_order(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only view your own orders"
             )
+    elif current_user.role == UserRole.VENDOR.value:
+        # Vendor can see orders containing their products
+        if not current_user.vendor_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vendor user must be linked to a vendor entity"
+            )
+        vendor_products, _ = await order_service.get_order_vendor_products(
+            order.id, current_user.vendor_id
+        )
+        if not vendor_products:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found or does not contain your vendor's products"
+            )
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -143,6 +220,22 @@ async def get_order(
     
     order_data = OrderResponse.model_validate(order).model_dump()
     order_data["products"] = products
+    
+    # For vendor users, add vendor_products and vendor_sales_amount
+    if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+        vendor_products, vendor_amount = await order_service.get_order_vendor_products(
+            order.id, current_user.vendor_id
+        )
+        order_data["vendor_products"] = [
+            OrderProductResponse(
+                product_id=op.product_id,
+                product_name=op.product_name,
+                product_price=op.product_price,
+                quantity=op.quantity
+            )
+            for op in vendor_products
+        ]
+        order_data["vendor_sales_amount"] = vendor_amount
     
     return OrderResponse(**order_data)
 

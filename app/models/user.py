@@ -14,6 +14,7 @@ class UserRole(str, enum.Enum):
     MANAGER = "MANAGER"
     ADMIN = "ADMIN"
     VISITOR = "VISITOR"
+    VENDOR = "VENDOR"
 
 
 class User(Base):
@@ -46,6 +47,13 @@ class User(Base):
         index=True
     )
     
+    # Vendor relationship (for VENDOR users only)
+    vendor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("vendors.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -70,6 +78,13 @@ class User(Base):
         "User",
         back_populates="manager",
         foreign_keys=[manager_id]
+    )
+    
+    # Vendor relationship (for VENDOR users only)
+    vendor: Mapped[Optional["Vendor"]] = relationship(
+        "Vendor",
+        back_populates="vendor_users",
+        foreign_keys=[vendor_id]
     )
     
     # Wishlists managed by this user (if MANAGER)
@@ -123,9 +138,15 @@ class User(Base):
     def is_visitor(self) -> bool:
         """Check if user is a visitor."""
         return self.role == UserRole.VISITOR.value
+    
+    @property
+    def is_vendor(self) -> bool:
+        """Check if user is a vendor."""
+        return self.role == UserRole.VENDOR.value
 
 
 # Index for efficient role-based queries
 Index("idx_users_role", User.role)
 Index("idx_users_email", User.email)
 Index("idx_users_manager_id", User.manager_id)
+Index("idx_users_vendor_id", User.vendor_id)

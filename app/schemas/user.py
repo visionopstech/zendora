@@ -17,6 +17,7 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     role: UserRole
     manager_id: Optional[UUID] = None
+    vendor_id: Optional[UUID] = None
 
 
 class UserRegister(BaseModel):
@@ -38,6 +39,7 @@ class UserResponse(UserBase):
     role: UserRole
     is_active: bool
     manager_id: Optional[UUID] = None
+    vendor_id: Optional[UUID] = None
     created_at: datetime
     
     class Config:
@@ -84,4 +86,5 @@ class UserManagementUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     manager_id: Optional[UUID] = None
+    vendor_id: Optional[UUID] = None
     password: Optional[str] = Field(None, min_length=8, description="New password (optional)")

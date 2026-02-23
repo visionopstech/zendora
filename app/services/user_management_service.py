@@ -4,6 +4,7 @@ from uuid import UUID
 from typing import Optional, List
 
 from app.models.user import User, UserRole
+from app.models.vendor import Vendor
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
@@ -57,13 +58,24 @@ class UserManagementService:
         )
         return list(result.scalars().all())
     
+    async def get_vendor_users(self, vendor_id: UUID) -> List[User]:
+        """Get all vendor users belonging to a specific vendor."""
+        result = await self.db.execute(
+            select(User).where(
+                User.vendor_id == vendor_id,
+                User.role == UserRole.VENDOR.value
+            ).order_by(User.created_at.desc())
+        )
+        return list(result.scalars().all())
+    
     async def create(
         self,
         email: str,
         password: str,
         role: UserRole,
         full_name: Optional[str] = None,
-        manager_id: Optional[UUID] = None
+        manager_id: Optional[UUID] = None,
+        vendor_id: Optional[UUID] = None
     ) -> User:
         """Create a new user."""
         # Check if email already exists
@@ -75,6 +87,9 @@ class UserManagementService:
         if role == UserRole.ADMIN and not manager_id:
             raise PermissionDenied("ADMIN users must have a manager_id")
         
+        if role == UserRole.VENDOR and not vendor_id:
+            raise PermissionDenied("VENDOR users must have a vendor_id")
+        
         # Verify manager exists if manager_id provided
         if manager_id:
             manager = await self.get_by_id(manager_id)
@@ -82,6 +97,13 @@ class UserManagementService:
                 raise NotFoundException("Manager not found")
             if manager.role != UserRole.MANAGER.value:
                 raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
+        
+        # Verify vendor exists if vendor_id provided
+        if vendor_id:
+            result = await self.db.execute(select(Vendor).where(Vendor.id == vendor_id))
+            vendor = result.scalar_one_or_none()
+            if not vendor:
+                raise NotFoundException("Vendor not found")
         
         password_hash = hash_password(password)
         
@@ -91,6 +113,7 @@ class UserManagementService:
             full_name=full_name,
             role=role.value if isinstance(role, UserRole) else role,
             manager_id=manager_id,
+            vendor_id=vendor_id,
             is_active=True
         )
         
@@ -108,6 +131,7 @@ class UserManagementService:
         role: Optional[UserRole] = None,
         is_active: Optional[bool] = None,
         manager_id: Optional[UUID] = None,
+        vendor_id: Optional[UUID] = None,
         password: Optional[str] = None
     ) -> User:
         """Update user details."""
@@ -133,6 +157,8 @@ class UserManagementService:
             # Validate role-specific requirements
             if role == UserRole.ADMIN and not (user.manager_id or manager_id):
                 raise PermissionDenied("ADMIN users must have a manager_id")
+            if role == UserRole.VENDOR and not (user.vendor_id or vendor_id):
+                raise PermissionDenied("VENDOR users must have a vendor_id")
         
         if is_active is not None:
             user.is_active = is_active
@@ -145,6 +171,14 @@ class UserManagementService:
             if manager.role != UserRole.MANAGER.value:
                 raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
             user.manager_id = manager_id
+        
+        if vendor_id is not None:
+            # Verify vendor exists
+            result = await self.db.execute(select(Vendor).where(Vendor.id == vendor_id))
+            vendor = result.scalar_one_or_none()
+            if not vendor:
+                raise NotFoundException("Vendor not found")
+            user.vendor_id = vendor_id
         
         if password:
             user.password_hash = hash_password(password)
