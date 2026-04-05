@@ -47,12 +47,20 @@ class WishlistCreate(WishlistBase):
     """Schema for creating a wishlist."""
     admin_email: str  # For manager to assign admin
     admin_full_name: str
-    products: Optional[List[WishlistProductInput]] = Field(default_factory=list, description="Optional list of products to add to the wishlist")
+    template_id: Optional[UUID] = None
+    products: Optional[List[WishlistProductInput]] = Field(
+        None,
+        description="Optional list of products to add to the wishlist",
+    )
 
 
 class WishlistCreateByAdmin(WishlistBase):
     """Schema for admin creating their own wishlist."""
-    products: Optional[List[WishlistProductInput]] = Field(default_factory=list, description="Optional list of products to add to the wishlist")
+    template_id: Optional[UUID] = None
+    products: Optional[List[WishlistProductInput]] = Field(
+        None,
+        description="Optional list of products to add to the wishlist",
+    )
 
 
 class WishlistUpdate(BaseModel):

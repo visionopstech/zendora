@@ -18,11 +18,24 @@ from app.schemas.wishlist import (
     ProductInWishlist
 )
 from app.services.wishlist_service import WishlistService
+from app.services.wishlist_template_service import WishlistTemplateService
 from app.services.user_service import UserService
 from app.services.qr_service import QRCodeService
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
 router = APIRouter()
+
+
+def _serialize_wishlist_products(products):
+    """Convert product request objects into service payloads."""
+
+    if products is None:
+        return None
+
+    return [
+        {"product_id": product.product_id, "quantity": product.quantity}
+        for product in products
+    ]
 
 
 @router.post("", response_model=WishlistResponse, status_code=status.HTTP_201_CREATED)
@@ -39,6 +52,7 @@ async def create_wishlist(
     - SUPER_ADMIN: Can create for any admin
     """
     wishlist_service = WishlistService(db)
+    template_service = WishlistTemplateService(db)
     user_service = UserService(db)
     
     try:
@@ -102,21 +116,40 @@ async def create_wishlist(
                 detail="You do not have permission to create wishlists"
             )
         
-        # Prepare delivery address
-        delivery_address = None
-        if wishlist_data.delivery_address:
-            delivery_address = wishlist_data.delivery_address.model_dump()
-        
-        # Prepare products
-        products = []
-        if hasattr(wishlist_data, 'products') and wishlist_data.products:
-            products = [
-                {"product_id": p.product_id, "quantity": p.quantity}
-                for p in wishlist_data.products
-            ]
-        
-        # Create wishlist
-        if products:
+        delivery_address = (
+            wishlist_data.delivery_address.model_dump() if wishlist_data.delivery_address else None
+        )
+        products = _serialize_wishlist_products(getattr(wishlist_data, "products", None))
+
+        if getattr(wishlist_data, "template_id", None):
+            template = await template_service.get_by_id(wishlist_data.template_id, load_products=True)
+            if not template:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Wishlist template not found",
+                )
+            if not template.is_active and current_user.role != UserRole.SUPER_ADMIN.value:
+                raise PermissionDenied("Wishlist template is inactive")
+
+            overrides = {
+                "title": wishlist_data.title,
+                "description": wishlist_data.description,
+                "logo_url": wishlist_data.logo_url,
+                "header_image_url": wishlist_data.header_image_url,
+                "primary_color": wishlist_data.primary_color,
+                "secondary_color": wishlist_data.secondary_color,
+                "delivery_address": delivery_address,
+                "products": products,
+            }
+            template_data = template_service.build_wishlist_payload(template)
+            wishlist = await wishlist_service.create_from_template(
+                admin_id=admin_id,
+                manager_id=manager_id,
+                template_data=template_data,
+                overrides=overrides,
+                override_fields=set(wishlist_data.model_fields_set),
+            )
+        elif products:
             wishlist = await wishlist_service.create_with_products(
                 admin_id=admin_id,
                 manager_id=manager_id,
@@ -153,7 +186,7 @@ async def create_wishlist(
         
     except (NotFoundException, ConflictError, PermissionDenied) as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=e.status_code if hasattr(e, "status_code") else status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
 

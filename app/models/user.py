@@ -115,6 +115,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan"
     )
+
+    created_wishlist_templates: Mapped[List["WishlistTemplate"]] = relationship(
+        "WishlistTemplate",
+        foreign_keys="WishlistTemplate.created_by",
+        back_populates="creator"
+    )
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role})>"

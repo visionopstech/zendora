@@ -14,10 +14,22 @@ from app.schemas.wishlist import (
     AddProductsListRequest
 )
 from app.services.wishlist_service import WishlistService
-from app.services.user_service import UserService
+from app.services.wishlist_template_service import WishlistTemplateService
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
 router = APIRouter()
+
+
+def _serialize_wishlist_products(products):
+    """Convert product request objects into service payloads."""
+
+    if products is None:
+        return None
+
+    return [
+        {"product_id": product.product_id, "quantity": product.quantity}
+        for product in products
+    ]
 
 
 @router.get("/wishlists", response_model=List[WishlistResponse])
@@ -51,21 +63,59 @@ async def create_my_wishlist(
         )
     
     wishlist_service = WishlistService(db)
-    
-    # Create wishlist
+    template_service = WishlistTemplateService(db)
     address_dict = wishlist_data.delivery_address.model_dump() if wishlist_data.delivery_address else None
-    
-    wishlist = await wishlist_service.create(
-        admin_id=current_user.id,
-        manager_id=current_user.manager_id,
-        title=wishlist_data.title,
-        description=wishlist_data.description,
-        logo_url=wishlist_data.logo_url,
-        header_image_url=wishlist_data.header_image_url,
-        primary_color=wishlist_data.primary_color,
-        secondary_color=wishlist_data.secondary_color,
-        delivery_address=address_dict
-    )
+    products = _serialize_wishlist_products(wishlist_data.products)
+
+    if wishlist_data.template_id:
+        template = await template_service.get_by_id(wishlist_data.template_id, load_products=True)
+        if not template or not template.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wishlist template not found",
+            )
+
+        wishlist = await wishlist_service.create_from_template(
+            admin_id=current_user.id,
+            manager_id=current_user.manager_id,
+            template_data=template_service.build_wishlist_payload(template),
+            overrides={
+                "title": wishlist_data.title,
+                "description": wishlist_data.description,
+                "logo_url": wishlist_data.logo_url,
+                "header_image_url": wishlist_data.header_image_url,
+                "primary_color": wishlist_data.primary_color,
+                "secondary_color": wishlist_data.secondary_color,
+                "delivery_address": address_dict,
+                "products": products,
+            },
+            override_fields=set(wishlist_data.model_fields_set),
+        )
+    elif products:
+        wishlist = await wishlist_service.create_with_products(
+            admin_id=current_user.id,
+            manager_id=current_user.manager_id,
+            products=products,
+            title=wishlist_data.title,
+            description=wishlist_data.description,
+            logo_url=wishlist_data.logo_url,
+            header_image_url=wishlist_data.header_image_url,
+            primary_color=wishlist_data.primary_color,
+            secondary_color=wishlist_data.secondary_color,
+            delivery_address=address_dict,
+        )
+    else:
+        wishlist = await wishlist_service.create(
+            admin_id=current_user.id,
+            manager_id=current_user.manager_id,
+            title=wishlist_data.title,
+            description=wishlist_data.description,
+            logo_url=wishlist_data.logo_url,
+            header_image_url=wishlist_data.header_image_url,
+            primary_color=wishlist_data.primary_color,
+            secondary_color=wishlist_data.secondary_color,
+            delivery_address=address_dict
+        )
     
     await db.commit()
     

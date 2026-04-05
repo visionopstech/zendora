@@ -52,6 +52,11 @@ class Product(Base):
         back_populates="product"
     )
     
+    wishlist_template_associations: Mapped[List["WishlistTemplateProduct"]] = relationship(
+        "WishlistTemplateProduct",
+        back_populates="product"
+    )
+    
     order_items: Mapped[List["OrderProduct"]] = relationship(
         "OrderProduct",
         back_populates="product"

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from app.models.wishlist import Wishlist, WishlistProduct, WishlistStatus
 from app.models.product import Product
@@ -160,6 +160,33 @@ class WishlistService:
         await self.db.refresh(wishlist)
         
         return wishlist
+
+    async def create_from_template(
+        self,
+        admin_id: UUID,
+        manager_id: UUID,
+        template_data: dict,
+        overrides: dict,
+        override_fields: set[str],
+    ) -> Wishlist:
+        """Create a wishlist by copying a template and applying request overrides."""
+
+        final_payload = {
+            "title": self._pick_value("title", template_data, overrides, override_fields),
+            "description": self._pick_value("description", template_data, overrides, override_fields),
+            "logo_url": self._pick_value("logo_url", template_data, overrides, override_fields),
+            "header_image_url": self._pick_value("header_image_url", template_data, overrides, override_fields),
+            "primary_color": self._pick_value("primary_color", template_data, overrides, override_fields),
+            "secondary_color": self._pick_value("secondary_color", template_data, overrides, override_fields),
+            "delivery_address": self._pick_value("delivery_address", template_data, overrides, override_fields),
+            "products": self._pick_value("products", template_data, overrides, override_fields) or [],
+        }
+
+        return await self._create_from_payload(
+            admin_id=admin_id,
+            manager_id=manager_id,
+            payload=final_payload,
+        )
     
     async def update(
         self,
@@ -357,6 +384,56 @@ class WishlistService:
             await self.db.refresh(wishlist, attribute_names=["products"])
         
         return wishlist
+
+    async def _create_from_payload(
+        self,
+        admin_id: UUID,
+        manager_id: UUID,
+        payload: dict[str, Any],
+    ) -> Wishlist:
+        """Create a wishlist from a prepared payload."""
+
+        products = payload.get("products") or []
+
+        if products:
+            return await self.create_with_products(
+                admin_id=admin_id,
+                manager_id=manager_id,
+                products=products,
+                title=payload.get("title"),
+                description=payload.get("description"),
+                logo_url=payload.get("logo_url"),
+                header_image_url=payload.get("header_image_url"),
+                primary_color=payload.get("primary_color"),
+                secondary_color=payload.get("secondary_color"),
+                delivery_address=payload.get("delivery_address"),
+            )
+
+        return await self.create(
+            admin_id=admin_id,
+            manager_id=manager_id,
+            title=payload.get("title"),
+            description=payload.get("description"),
+            logo_url=payload.get("logo_url"),
+            header_image_url=payload.get("header_image_url"),
+            primary_color=payload.get("primary_color"),
+            secondary_color=payload.get("secondary_color"),
+            delivery_address=payload.get("delivery_address"),
+        )
+
+    @staticmethod
+    def _pick_value(
+        field_name: str,
+        template_data: dict,
+        overrides: dict,
+        override_fields: set[str],
+    ):
+        """Resolve a field from request overrides first, then template defaults."""
+
+        if field_name in override_fields:
+            return overrides.get(field_name)
+
+        return template_data.get(field_name)
     
     async def update_products(
         self,

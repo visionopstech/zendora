@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.vendor import Vendor
 from app.models.product import Product, ProductVendor
 from app.models.wishlist import Wishlist, WishlistProduct
+from app.models.wishlist_template import WishlistTemplate, WishlistTemplateProduct
 from app.models.order import Order, OrderProduct
 
 # this is the Alembic Config object
