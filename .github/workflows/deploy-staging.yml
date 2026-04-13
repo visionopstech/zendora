@@ -1,0 +1,48 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGE_SERVER_IP }}
+          username: ${{ secrets.STAGE_SERVER_GITHUB_USERNAME }}
+          key: ${{ secrets.STAGE_SERVER_GITHUB_SSHKEY }}
+          port: 22
+          script: |
+            set -e
+
+            # Update this path to the location of this repo on the staging server.
+            DEPLOY_PATH="/srv/sites/zendora"
+
+            cd "$DEPLOY_PATH"
+
+            docker compose down
+
+            git fetch origin develop
+            git reset --hard origin/develop
+
+            docker compose up --build -d --force-recreate
+
+            echo "Waiting for services to start..."
+            sleep 10
+
+            docker compose ps
+
+            echo "Running database migrations..."
+            docker exec -ti zendora-api-1 alembic upgrade head
+
+            echo "Checking API health..."
+            docker exec -ti zendora-api-1 python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
