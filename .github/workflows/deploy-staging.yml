@@ -42,7 +42,7 @@ jobs:
             docker compose ps
 
             echo "Running database migrations..."
-            docker exec -ti zendora-api-1 alembic upgrade head
+            docker exec zendora-api-1 alembic upgrade head
 
             echo "Checking API health..."
-            docker exec -ti zendora-api-1 python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
+            docker exec zendora-api-1 python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
