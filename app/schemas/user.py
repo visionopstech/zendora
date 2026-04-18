@@ -1,6 +1,7 @@
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
+from decimal import Decimal
 from datetime import datetime
 
 from app.models.user import UserRole
@@ -18,6 +19,7 @@ class UserCreate(UserBase):
     role: UserRole
     manager_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
+    profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class UserRegister(BaseModel):
@@ -40,6 +42,7 @@ class UserResponse(UserBase):
     is_active: bool
     manager_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
+    profit_percentage: Optional[Decimal] = None
     created_at: datetime
     
     class Config:
@@ -87,4 +90,5 @@ class UserManagementUpdate(BaseModel):
     is_active: Optional[bool] = None
     manager_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
+    profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
     password: Optional[str] = Field(None, min_length=8, description="New password (optional)")

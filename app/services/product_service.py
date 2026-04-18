@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from app.models.product import Product, ProductVendor
 from app.models.vendor import Vendor
-from app.core.exceptions import NotFoundException, ConflictError
+from app.core.exceptions import NotFoundException, ValidationError
 
 
 class ProductService:
@@ -15,6 +15,10 @@ class ProductService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    def _validate_prices(self, base_price: Decimal, price: Decimal) -> None:
+        if price < base_price:
+            raise ValidationError("price must be greater than or equal to base_price")
     
     async def get_by_id(self, product_id: UUID, load_vendors: bool = False) -> Optional[Product]:
         """Get product by ID."""
@@ -66,14 +70,17 @@ class ProductService:
     async def create(
         self,
         name: str,
+        base_price: Decimal,
         price: Decimal,
         description: Optional[str] = None,
         images: Optional[List[str]] = None
     ) -> Product:
         """Create a new product."""
+        self._validate_prices(base_price, price)
         product = Product(
             name=name,
             description=description,
+            base_price=base_price,
             price=price,
             images=images or [],
             is_active=True
@@ -88,6 +95,7 @@ class ProductService:
     async def create_with_vendors(
         self,
         name: str,
+        base_price: Decimal,
         price: Decimal,
         vendor_ids: List[UUID],
         description: Optional[str] = None,
@@ -97,6 +105,7 @@ class ProductService:
         # Create the product
         product = await self.create(
             name=name,
+            base_price=base_price,
             price=price,
             description=description,
             images=images
@@ -131,6 +140,7 @@ class ProductService:
         product_id: UUID,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        base_price: Optional[Decimal] = None,
         price: Optional[Decimal] = None,
         images: Optional[List[str]] = None,
         is_active: Optional[bool] = None
@@ -140,11 +150,17 @@ class ProductService:
         
         if not product:
             raise NotFoundException("Product not found")
+
+        next_base_price = base_price if base_price is not None else product.base_price
+        next_price = price if price is not None else product.price
+        self._validate_prices(next_base_price, next_price)
         
         if name is not None:
             product.name = name
         if description is not None:
             product.description = description
+        if base_price is not None:
+            product.base_price = base_price
         if price is not None:
             product.price = price
         if images is not None:

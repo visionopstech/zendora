@@ -1,12 +1,15 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional, List
+from decimal import Decimal
 
 from app.models.user import User, UserRole
 from app.models.vendor import Vendor
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
+from app.services.financial_service import FinancialService
 
 
 class UserManagementService:
@@ -18,14 +21,18 @@ class UserManagementService:
     async def get_by_id(self, user_id: UUID) -> Optional[User]:
         """Get user by ID."""
         result = await self.db.execute(
-            select(User).where(User.id == user_id)
+            select(User)
+            .options(selectinload(User.manager_commission))
+            .where(User.id == user_id)
         )
         return result.scalar_one_or_none()
     
     async def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email."""
         result = await self.db.execute(
-            select(User).where(User.email == email)
+            select(User)
+            .options(selectinload(User.manager_commission))
+            .where(User.email == email)
         )
         return result.scalar_one_or_none()
     
@@ -35,7 +42,7 @@ class UserManagementService:
         include_inactive: bool = False
     ) -> List[User]:
         """Get all users, optionally filtered by role."""
-        query = select(User)
+        query = select(User).options(selectinload(User.manager_commission))
         
         if role:
             query = query.where(User.role == role.value)
@@ -51,7 +58,9 @@ class UserManagementService:
     async def get_manager_admins(self, manager_id: UUID) -> List[User]:
         """Get all admins belonging to a specific manager."""
         result = await self.db.execute(
-            select(User).where(
+            select(User)
+            .options(selectinload(User.manager_commission))
+            .where(
                 User.manager_id == manager_id,
                 User.role == UserRole.ADMIN.value
             ).order_by(User.created_at.desc())
@@ -75,7 +84,8 @@ class UserManagementService:
         role: UserRole,
         full_name: Optional[str] = None,
         manager_id: Optional[UUID] = None,
-        vendor_id: Optional[UUID] = None
+        vendor_id: Optional[UUID] = None,
+        profit_percentage: Optional[Decimal] = None
     ) -> User:
         """Create a new user."""
         # Check if email already exists
@@ -89,6 +99,9 @@ class UserManagementService:
         
         if role == UserRole.VENDOR and not vendor_id:
             raise PermissionDenied("VENDOR users must have a vendor_id")
+
+        if profit_percentage is not None and role != UserRole.MANAGER:
+            raise PermissionDenied("profit_percentage can only be set for MANAGER users")
         
         # Verify manager exists if manager_id provided
         if manager_id:
@@ -119,7 +132,12 @@ class UserManagementService:
         
         self.db.add(user)
         await self.db.flush()
-        await self.db.refresh(user)
+
+        if role == UserRole.MANAGER and profit_percentage is not None:
+            financial_service = FinancialService(self.db)
+            await financial_service.upsert_manager_commission(user.id, profit_percentage)
+
+        user = await self.get_by_id(user.id)
         
         return user
     
@@ -132,7 +150,9 @@ class UserManagementService:
         is_active: Optional[bool] = None,
         manager_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        profit_percentage: Optional[Decimal] = None,
+        profit_percentage_provided: bool = False,
     ) -> User:
         """Update user details."""
         user = await self.get_by_id(user_id)
@@ -150,9 +170,11 @@ class UserManagementService:
         if full_name is not None:
             user.full_name = full_name
         
+        resulting_role = user.role
         if role is not None:
             role_value = role.value if isinstance(role, UserRole) else role
             user.role = role_value
+            resulting_role = role_value
             
             # Validate role-specific requirements
             if role == UserRole.ADMIN and not (user.manager_id or manager_id):
@@ -182,9 +204,21 @@ class UserManagementService:
         
         if password:
             user.password_hash = hash_password(password)
+
+        if profit_percentage_provided and resulting_role != UserRole.MANAGER.value:
+            raise PermissionDenied("profit_percentage can only be set for MANAGER users")
+
+        financial_service = FinancialService(self.db)
+        if resulting_role == UserRole.MANAGER.value:
+            if profit_percentage_provided:
+                await financial_service.upsert_manager_commission(user.id, profit_percentage)
+        else:
+            commission = await financial_service.get_manager_commission(user.id)
+            if commission:
+                await self.db.delete(commission)
         
         await self.db.flush()
-        await self.db.refresh(user)
+        user = await self.get_by_id(user.id)
         
         return user
     

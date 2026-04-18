@@ -16,7 +16,7 @@ from app.schemas.product import (
 )
 from app.services.vendor_service import VendorService
 from app.services.product_service import ProductService
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import NotFoundException, ValidationError
 
 router = APIRouter()
 
@@ -112,17 +112,24 @@ async def create_product(
 ):
     """Create a new product (SUPER_ADMIN only)."""
     product_service = ProductService(db)
-    
-    product = await product_service.create(
-        name=product_data.name,
-        description=product_data.description,
-        price=product_data.price,
-        images=product_data.images
-    )
-    
-    await db.commit()
-    
-    return ProductResponse.model_validate(product)
+
+    try:
+        product = await product_service.create(
+            name=product_data.name,
+            description=product_data.description,
+            base_price=product_data.base_price,
+            price=product_data.price,
+            images=product_data.images
+        )
+        
+        await db.commit()
+        
+        return ProductResponse.model_validate(product)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
 
 
 @router.get("/products", response_model=List[ProductResponse])
@@ -177,6 +184,7 @@ async def update_product(
             product_id=product_id,
             name=product_data.name,
             description=product_data.description,
+            base_price=product_data.base_price,
             price=product_data.price,
             images=product_data.images,
             is_active=product_data.is_active
@@ -188,6 +196,11 @@ async def update_product(
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
         )
 

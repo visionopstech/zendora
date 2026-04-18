@@ -4,8 +4,11 @@ import stripe
 
 from app.core.database import AsyncSessionLocal
 from app.services.stripe_service import StripeService
+from app.services.financial_service import FinancialService
 from app.services.order_service import OrderService
 from app.core.config import settings
+from app.core.exceptions import NotFoundException
+from app.models.order import OrderStatus
 
 router = APIRouter()
 
@@ -83,6 +86,7 @@ async def handle_successful_payment(session: dict):
     async with AsyncSessionLocal() as db:
         try:
             order_service = OrderService(db)
+            financial_service = FinancialService(db)
             
             # Get order ID from metadata
             order_id = session['metadata'].get('order_id')
@@ -98,10 +102,22 @@ async def handle_successful_payment(session: dict):
             if not order:
                 print(f"Error: Order {order_id} not found")
                 return
+
+            was_paid = order.status == OrderStatus.PAID.value
             
             # Mark as paid
-            await order_service.mark_as_paid(order.id)
+            if not was_paid:
+                await order_service.mark_as_paid(order.id)
+
+            try:
+                commission_credited = await financial_service.credit_order_commission(order.id)
+            except NotFoundException:
+                commission_credited = False
             await db.commit()
+
+            if was_paid and not commission_credited:
+                print(f"Order {order_id} already processed")
+                return
             
             # Reload order with relationships
             await db.refresh(order, ['visitor', 'admin', 'wishlist', 'products'])

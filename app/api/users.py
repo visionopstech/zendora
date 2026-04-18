@@ -34,7 +34,8 @@ async def create_user(
             role=user_data.role,
             full_name=user_data.full_name,
             manager_id=user_data.manager_id,
-            vendor_id=user_data.vendor_id
+            vendor_id=user_data.vendor_id,
+            profit_percentage=user_data.profit_percentage
         )
         
         await db.commit()
@@ -202,7 +203,9 @@ async def update_user(
             is_active=user_data.is_active,
             manager_id=user_data.manager_id,
             vendor_id=user_data.vendor_id,
-            password=user_data.password
+            password=user_data.password,
+            profit_percentage=user_data.profit_percentage,
+            profit_percentage_provided="profit_percentage" in user_data.model_fields_set,
         )
         
         await db.commit()

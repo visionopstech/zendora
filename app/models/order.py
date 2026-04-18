@@ -97,6 +97,19 @@ class Order(Base):
         back_populates="order",
         cascade="all, delete-orphan"
     )
+
+    commission: Mapped[Optional["OrderCommission"]] = relationship(
+        "OrderCommission",
+        back_populates="order",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    wallet_transactions: Mapped[List["WalletTransaction"]] = relationship(
+        "WalletTransaction",
+        back_populates="order",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         return f"<Order(id={self.id}, status={self.status}, total={self.total_amount})>"

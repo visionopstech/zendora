@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, JSON
+from sqlalchemy import String, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, JSON, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -13,6 +13,9 @@ class Product(Base):
     """Product model for items that can be added to wishlists."""
     
     __tablename__ = "products"
+    __table_args__ = (
+        CheckConstraint("price >= base_price", name="ck_products_price_gte_base_price"),
+    )
     
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
@@ -24,6 +27,7 @@ class Product(Base):
     # Product information
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     images: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -63,7 +67,10 @@ class Product(Base):
     )
     
     def __repr__(self) -> str:
-        return f"<Product(id={self.id}, name={self.name}, price={self.price})>"
+        return (
+            f"<Product(id={self.id}, name={self.name}, "
+            f"base_price={self.base_price}, price={self.price})>"
+        )
 
 
 class ProductVendor(Base):

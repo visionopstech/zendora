@@ -1,7 +1,9 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index
+from decimal import Decimal
+
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -116,6 +118,24 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
+    manager_commission: Mapped[Optional["ManagerCommission"]] = relationship(
+        "ManagerCommission",
+        back_populates="manager",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    wallet: Mapped[Optional["Wallet"]] = relationship(
+        "Wallet",
+        back_populates="manager",
+        uselist=False
+    )
+
+    order_commissions: Mapped[List["OrderCommission"]] = relationship(
+        "OrderCommission",
+        back_populates="manager"
+    )
+
     created_wishlist_templates: Mapped[List["WishlistTemplate"]] = relationship(
         "WishlistTemplate",
         foreign_keys="WishlistTemplate.created_by",
@@ -149,6 +169,16 @@ class User(Base):
     def is_vendor(self) -> bool:
         """Check if user is a vendor."""
         return self.role == UserRole.VENDOR.value
+
+    @property
+    def profit_percentage(self) -> Optional[Decimal]:
+        """Expose commission config on API responses when already loaded."""
+        state = inspect(self)
+        if "manager_commission" in state.unloaded:
+            return None
+        if not self.manager_commission:
+            return None
+        return self.manager_commission.profit_percentage
 
 
 # Index for efficient role-based queries

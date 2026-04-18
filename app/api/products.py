@@ -15,7 +15,7 @@ from app.schemas.product import (
     AssociateVendorsRequest
 )
 from app.services.product_service import ProductService
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import NotFoundException, ValidationError
 
 router = APIRouter()
 
@@ -57,6 +57,7 @@ async def create_product(
         if vendor_ids:
             product = await product_service.create_with_vendors(
                 name=product_data.name,
+                base_price=product_data.base_price,
                 description=product_data.description,
                 price=product_data.price,
                 images=product_data.images,
@@ -68,6 +69,7 @@ async def create_product(
                 vendor_ids = [current_user.vendor_id]
                 product = await product_service.create_with_vendors(
                     name=product_data.name,
+                    base_price=product_data.base_price,
                     description=product_data.description,
                     price=product_data.price,
                     images=product_data.images,
@@ -76,6 +78,7 @@ async def create_product(
             else:
                 product = await product_service.create(
                     name=product_data.name,
+                    base_price=product_data.base_price,
                     description=product_data.description,
                     price=product_data.price,
                     images=product_data.images
@@ -92,6 +95,11 @@ async def create_product(
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
         )
 
@@ -186,6 +194,7 @@ async def update_product(
             product_id=product_id,
             name=product_data.name,
             description=product_data.description,
+            base_price=product_data.base_price,
             price=product_data.price,
             images=product_data.images,
             is_active=product_data.is_active
@@ -211,6 +220,11 @@ async def update_product(
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
         )
 

@@ -10,6 +10,7 @@ from app.models.order import Order, OrderProduct, OrderStatus
 from app.models.product import Product, ProductVendor
 from app.models.wishlist import Wishlist
 from app.core.exceptions import NotFoundException
+from app.services.financial_service import FinancialService
 
 
 class OrderService:
@@ -65,10 +66,15 @@ class OrderService:
         Returns:
             Order: Created order
         """
-        # Calculate total amount
-        total_amount = sum(
-            product.price * quantities.get(product.id, 1)
-            for product in products
+        wishlist = await self.db.get(Wishlist, wishlist_id)
+        if not wishlist:
+            raise NotFoundException("Wishlist not found")
+
+        financial_service = FinancialService(self.db)
+        commission_data = await financial_service.calculate_order_commission(
+            products=products,
+            quantities=quantities,
+            manager_profit_percentage=await financial_service.get_manager_profit_percentage(wishlist.manager_id),
         )
         
         # Create order
@@ -78,7 +84,7 @@ class OrderService:
             admin_id=admin_id,
             stripe_session_id=stripe_session_id,
             status=OrderStatus.PENDING.value,
-            total_amount=total_amount,
+            total_amount=commission_data["final_amount"],
             currency="USD"
         )
         
@@ -96,6 +102,13 @@ class OrderService:
                 quantity=quantity
             )
             self.db.add(order_product)
+
+        await financial_service.create_order_commission_snapshot(
+            order_id=order.id,
+            manager_id=wishlist.manager_id,
+            products=products,
+            quantities=quantities,
+        )
         
         await self.db.flush()
         await self.db.refresh(order)
