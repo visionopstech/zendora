@@ -5,7 +5,7 @@ from typing import List
 
 from app.core.database import get_db
 from app.models.user import User, UserRole
-from app.dependencies.auth import require_super_admin, get_current_user, require_vendor_with_entity
+from app.dependencies.auth import get_current_user
 from app.core.exceptions import PermissionDenied
 from app.schemas.product import (
     ProductCreate,
@@ -27,6 +27,19 @@ def _require_super_admin_or_vendor(current_user: User = Depends(get_current_user
     if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
         return current_user
     raise PermissionDenied("This action requires SUPER_ADMIN or VENDOR role")
+
+
+def _require_product_list_access(current_user: User = Depends(get_current_user)) -> User:
+    """Allow back-office roles and vendor users to list products."""
+    if current_user.role in {
+        UserRole.SUPER_ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.ADMIN.value,
+    }:
+        return current_user
+    if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+        return current_user
+    raise PermissionDenied("This action requires SUPER_ADMIN, MANAGER, ADMIN, or VENDOR role")
 
 
 @router.post("", response_model=ProductWithVendors, status_code=status.HTTP_201_CREATED)
@@ -108,9 +121,9 @@ async def create_product(
 async def list_products(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(_require_super_admin_or_vendor)
+    current_user: User = Depends(_require_product_list_access)
 ):
-    """List products. SUPER_ADMIN: all products. VENDOR: only their vendor's products."""
+    """List products. Back-office roles see all products; vendors see only their own."""
     product_service = ProductService(db)
     vendor_id = current_user.vendor_id if current_user.role == UserRole.VENDOR.value else None
     products = await product_service.get_all(
