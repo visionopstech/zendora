@@ -38,7 +38,7 @@ async def initiate_checkout(
     order_service = OrderService(db)
     stripe_service = StripeService()
 
-    wishlist = await wishlist_service.get_by_slug(public_slug)
+    wishlist = await wishlist_service.get_by_slug(public_slug, load_products=True)
 
     if not wishlist:
         raise HTTPException(

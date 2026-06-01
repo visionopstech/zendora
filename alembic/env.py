@@ -10,12 +10,24 @@ from app.core.database import Base
 from app.core.config import settings
 
 # Import all models to ensure they're registered with Base.metadata
-from app.models.user import User
-from app.models.vendor import Vendor
-from app.models.product import Product, ProductVendor
-from app.models.wishlist import Wishlist, WishlistProduct
-from app.models.wishlist_template import WishlistTemplate, WishlistTemplateProduct
-from app.models.order import Order, OrderProduct
+from app.models import (  # noqa: F401
+    User,
+    Vendor,
+    Product,
+    ProductVendor,
+    Wishlist,
+    WishlistProduct,
+    WishlistTemplate,
+    WishlistTemplateProduct,
+    Order,
+    OrderProduct,
+    ManagerCommission,
+    Wallet,
+    WalletTransaction,
+    OrderCommission,
+    ManagerSettings,
+    WishlistSettings,
+)
 
 # this is the Alembic Config object
 config = context.config
