@@ -1,6 +1,7 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
 
 from app.core.database import get_db
 from app.schemas.order import CheckoutRequest, CheckoutResponse
@@ -10,7 +11,6 @@ from app.services.visitor_service import VisitorService
 from app.services.order_service import OrderService
 from app.services.stripe_service import StripeService
 from app.models.wishlist import WishlistStatus
-from app.core.exceptions import NotFoundException
 
 router = APIRouter()
 
@@ -19,11 +19,11 @@ router = APIRouter()
 async def initiate_checkout(
     public_slug: str,
     checkout_data: CheckoutRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Initiate checkout for a public wishlist.
-    
+
     This endpoint:
     1. Validates the wishlist is published
     2. Gets or creates the visitor user
@@ -37,91 +37,77 @@ async def initiate_checkout(
     visitor_service = VisitorService(db)
     order_service = OrderService(db)
     stripe_service = StripeService()
-    
-    # Get wishlist
-    wishlist = await wishlist_service.get_by_slug(public_slug)
-    
+
+    wishlist = await wishlist_service.get_by_slug(public_slug, load_products=True)
+
     if not wishlist:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Wishlist not found"
+            detail="Wishlist not found",
         )
-    
+
     if wishlist.status != WishlistStatus.PUBLISHED:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Wishlist not found"
+            detail="Wishlist not found",
         )
-    
-    # Get or create visitor
+
     visitor = await visitor_service.get_or_create_visitor(
         email=checkout_data.visitor_email,
-        full_name=checkout_data.visitor_name
+        full_name=checkout_data.visitor_name,
     )
-    
-    # Get products
+
     products = await product_service.get_by_ids(checkout_data.product_ids)
-    
+
     if len(products) != len(checkout_data.product_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="One or more products not found"
+            detail="One or more products not found",
         )
-    
-    # Validate all products are in the wishlist
-    wishlist_product_ids = set(wp.product_id for wp in wishlist.products)
+
+    wishlist_product_ids = {wp.product_id for wp in wishlist.products}
     for product_id in checkout_data.product_ids:
         if product_id not in wishlist_product_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Product {product_id} is not in this wishlist"
+                detail=f"Product {product_id} is not in this wishlist",
             )
-    
-    # Build quantities dict (all quantity 1 for MVP)
+
     quantities = {product.id: 1 for product in products}
-    
-    # Create Stripe session first to get session ID
-    # Temporary session ID for order creation
-    import uuid
-    temp_session_id = f"temp_{uuid.uuid4()}"
-    
-    # Create order
+
+    temp_session_id = f"pending_{uuid.uuid4()}"
+
     order = await order_service.create_order(
         visitor_id=visitor.id,
         wishlist_id=wishlist.id,
         admin_id=wishlist.admin_id,
         stripe_session_id=temp_session_id,
         products=products,
-        quantities=quantities
+        quantities=quantities,
     )
-    
-    # Create Stripe checkout session
+
     try:
-        checkout_url = await stripe_service.create_checkout_session(
+        checkout_session = await stripe_service.create_checkout_session(
             order_id=order.id,
             products=products,
             quantities=quantities,
-            visitor_email=checkout_data.visitor_email
+            visitor_email=checkout_data.visitor_email,
         )
-        
-        # Update order with actual Stripe session ID
-        # Extract session ID from URL
-        stripe_session_id = checkout_url.split("/")[-1].split("?")[0]
-        order.stripe_session_id = stripe_session_id
-        
+
+        order.stripe_session_id = checkout_session.session_id
+
         await db.commit()
-        
+
         return CheckoutResponse(
             order_id=order.id,
-            checkout_url=checkout_url,
-            total_amount=order.total_amount
+            checkout_url=checkout_session.url,
+            total_amount=order.total_amount,
         )
     except Exception as e:
-        # If Stripe checkout fails, mark order as failed
         await order_service.mark_as_failed(order.id)
         await db.commit()
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create checkout session: {str(e)}"
+            detail=f"Failed to create checkout session: {str(e)}",
         )
