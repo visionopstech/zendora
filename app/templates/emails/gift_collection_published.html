@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wishlist Published</title>
+    <title>Gift Collection Published</title>
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -17,24 +17,24 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎉 Wishlist Published!</h1>
+            <h1>Gift Collection Published</h1>
         </div>
         <div class="content">
-            <h2>Hello {{ manager_name }},</h2>
-            <p>Great news! A wishlist has been published and is now live.</p>
+            <h2>Hello {{ director_name }},</h2>
+            <p>A gift collection has been published and is now live.</p>
             
             <div class="info-box">
-                <h3>Wishlist Details</h3>
-                <p><strong>Title:</strong> {{ wishlist_title }}</p>
-                <p><strong>Admin:</strong> {{ admin_email }}</p>
-                <p><strong>Status:</strong> Published ✓</p>
+                <h3>Collection Details</h3>
+                <p><strong>Title:</strong> {{ collection_title }}</p>
+                <p><strong>Family admin:</strong> {{ family_admin_email }}</p>
+                <p><strong>Status:</strong> Published</p>
             </div>
             
-            <p>The wishlist is now accessible to visitors. You can view it using the link below:</p>
+            <p>The collection is now accessible to visitors. You can view it using the link below:</p>
             
-            <a href="{{ wishlist_url }}" class="button">View Wishlist</a>
+            <a href="{{ collection_url }}" class="button">View Gift Collection</a>
             
-            <p style="margin-top: 30px;">Share this link with your audience to start receiving purchases!</p>
+            <p style="margin-top: 30px;">Share this link with the family's circle so they can start contributing.</p>
         </div>
         <div class="footer">
             <p>© 2026 Zendora. All rights reserved.</p>

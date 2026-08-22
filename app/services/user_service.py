@@ -3,12 +3,10 @@ from sqlalchemy import select
 from uuid import UUID
 from typing import Optional
 import secrets
-from datetime import datetime, timedelta
 
 from app.models.user import User, UserRole
-from app.core.security import hash_password, verify_password, create_access_token
-from app.core.exceptions import NotFoundException, UnauthorizedError
-from app.core.config import settings
+from app.core.security import hash_password, verify_password
+from app.core.exceptions import NotFoundException
 
 
 class UserService:
@@ -37,7 +35,8 @@ class UserService:
         password: Optional[str],
         role: UserRole,
         full_name: Optional[str] = None,
-        manager_id: Optional[UUID] = None
+        director_id: Optional[UUID] = None,
+        funeral_home_id: Optional[UUID] = None
     ) -> User:
         """Create a new user."""
         password_hash = hash_password(password) if password else None
@@ -47,7 +46,8 @@ class UserService:
             password_hash=password_hash,
             full_name=full_name,
             role=role.value if isinstance(role, UserRole) else role,
-            manager_id=manager_id,
+            director_id=director_id,
+            funeral_home_id=funeral_home_id,
             is_active=True
         )
         
@@ -89,14 +89,15 @@ class UserService:
         alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
         return ''.join(secrets.choice(alphabet) for _ in range(length))
     
-    async def create_admin_with_manager(
+    async def create_family_admin_with_director(
         self,
         email: str,
         full_name: str,
-        manager_id: UUID
+        director_id: UUID,
+        funeral_home_id: Optional[UUID] = None
     ) -> tuple[User, str]:
         """
-        Create an admin user with a generated password.
+        Create a family admin user with a generated password.
         Returns the user and the plain text password.
         """
         password = self.generate_password()
@@ -104,19 +105,20 @@ class UserService:
         user = await self.create_user(
             email=email,
             password=password,
-            role=UserRole.ADMIN.value,
+            role=UserRole.FAMILY_ADMIN.value,
             full_name=full_name,
-            manager_id=manager_id
+            director_id=director_id,
+            funeral_home_id=funeral_home_id
         )
         
         return user, password
     
-    async def get_manager_admins(self, manager_id: UUID) -> list[User]:
-        """Get all admins belonging to a manager."""
+    async def get_director_family_admins(self, director_id: UUID) -> list[User]:
+        """Get all family admins belonging to a director."""
         result = await self.db.execute(
             select(User).where(
-                User.manager_id == manager_id,
-                User.role == UserRole.ADMIN.value
+                User.director_id == director_id,
+                User.role == UserRole.FAMILY_ADMIN.value
             )
         )
         return list(result.scalars().all())

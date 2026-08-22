@@ -5,12 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas.order import CheckoutRequest, CheckoutResponse
-from app.services.wishlist_service import WishlistService
+from app.services.gift_collection_service import GiftCollectionService
 from app.services.product_service import ProductService
 from app.services.visitor_service import VisitorService
 from app.services.order_service import OrderService
 from app.services.stripe_service import StripeService
-from app.models.wishlist import WishlistStatus
+from app.models.gift_collection import GiftCollectionStatus
 
 router = APIRouter()
 
@@ -22,34 +22,28 @@ async def initiate_checkout(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Initiate checkout for a public wishlist.
+    Initiate checkout for a public gift collection.
 
     This endpoint:
-    1. Validates the wishlist is published
+    1. Validates the gift collection is published
     2. Gets or creates the visitor user
-    3. Validates all products exist
+    3. Validates all gifts exist
     4. Creates a pending order
     5. Creates a Stripe Checkout session
     6. Returns the checkout URL
     """
-    wishlist_service = WishlistService(db)
+    collection_service = GiftCollectionService(db)
     product_service = ProductService(db)
     visitor_service = VisitorService(db)
     order_service = OrderService(db)
     stripe_service = StripeService()
 
-    wishlist = await wishlist_service.get_by_slug(public_slug, load_products=True)
+    collection = await collection_service.get_by_slug(public_slug, load_products=True)
 
-    if not wishlist:
+    if not collection or collection.status != GiftCollectionStatus.PUBLISHED.value:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Wishlist not found",
-        )
-
-    if wishlist.status != WishlistStatus.PUBLISHED:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Wishlist not found",
+            detail="Gift collection not found",
         )
 
     visitor = await visitor_service.get_or_create_visitor(
@@ -65,12 +59,12 @@ async def initiate_checkout(
             detail="One or more products not found",
         )
 
-    wishlist_product_ids = {wp.product_id for wp in wishlist.products}
+    collection_product_ids = {item.product_id for item in collection.products}
     for product_id in checkout_data.product_ids:
-        if product_id not in wishlist_product_ids:
+        if product_id not in collection_product_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Product {product_id} is not in this wishlist",
+                detail=f"Product {product_id} is not in this gift collection",
             )
 
     quantities = {product.id: 1 for product in products}
@@ -79,8 +73,8 @@ async def initiate_checkout(
 
     order = await order_service.create_order(
         visitor_id=visitor.id,
-        wishlist_id=wishlist.id,
-        admin_id=wishlist.admin_id,
+        gift_collection_id=collection.id,
+        family_admin_id=collection.family_admin_id,
         stripe_session_id=temp_session_id,
         products=products,
         quantities=quantities,

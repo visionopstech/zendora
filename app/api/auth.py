@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from typing import List
+
 from app.core.database import get_db
 from app.schemas.user import (
+    RegistrableRole,
+    RegistrableRoleOption,
     UserRegister,
     UserLogin,
     TokenResponse,
@@ -15,9 +19,46 @@ from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 from app.services.third_party_auth import ThirdPartyAuthService
 from app.models.user import UserRole
-from app.core.exceptions import UnauthorizedError, ConflictError
+from app.core.exceptions import UnauthorizedError, ConflictError, PermissionDenied
 
 router = APIRouter()
+
+
+REGISTRABLE_ROLE_OPTIONS: List[RegistrableRoleOption] = [
+    RegistrableRoleOption(
+        value=RegistrableRole.DIRECTOR,
+        label="Funeral home director",
+        description=(
+            "Runs a funeral home workspace. A super admin assigns you to a funeral "
+            "home after signup; until then funeral-home features are unavailable."
+        ),
+    ),
+    RegistrableRoleOption(
+        value=RegistrableRole.FAMILY_ADMIN,
+        label="Family admin",
+        description="Manages a family's gift collection.",
+    ),
+    RegistrableRoleOption(
+        value=RegistrableRole.VISITOR,
+        label="Visitor",
+        description="Browses published gift collections and buys gifts.",
+    ),
+    RegistrableRoleOption(
+        value=RegistrableRole.VENDOR,
+        label="Vendor",
+        description="Supplies gifts. A super admin links you to a vendor entity after signup.",
+    ),
+]
+
+
+@router.get("/registrable-roles", response_model=List[RegistrableRoleOption])
+async def list_registrable_roles():
+    """
+    List the roles a new account may choose at registration.
+    
+    SUPER_ADMIN is never registrable and is therefore not returned.
+    """
+    return REGISTRABLE_ROLE_OPTIONS
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -26,10 +67,11 @@ async def register(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Register a new user account.
+    Register a new user account with a self-selected role.
     
-    Creates a new user with VISITOR role and returns JWT access token.
-    Users are automatically logged in after successful registration.
+    Any role except SUPER_ADMIN can be chosen; see GET /auth/registrable-roles.
+    The account is active immediately and a JWT access token is returned. A
+    director has no funeral home until a super admin assigns one.
     """
     auth_service = AuthService(db)
     
@@ -37,7 +79,8 @@ async def register(
         user, token = await auth_service.register_user(
             email=registration.email,
             password=registration.password,
-            full_name=registration.full_name
+            full_name=registration.full_name,
+            role=UserRole(registration.role.value)
         )
         
         await db.commit()
@@ -50,6 +93,11 @@ async def register(
     except ConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
+    except PermissionDenied as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
 

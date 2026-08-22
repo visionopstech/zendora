@@ -7,10 +7,10 @@ from typing import Optional
 from app.core.database import Base
 
 
-class ManagerSettings(Base):
-    """Manager settings model for UI customization applied to all wishlists."""
+class DirectorSettings(Base):
+    """Director settings for UI customization applied to all their gift collections."""
     
-    __tablename__ = "manager_settings"
+    __tablename__ = "director_settings"
     
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
@@ -19,8 +19,8 @@ class ManagerSettings(Base):
         server_default="gen_random_uuid()"
     )
     
-    # Foreign key to manager (user)
-    manager_id: Mapped[uuid.UUID] = mapped_column(
+    # Foreign key to director (user)
+    director_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
@@ -51,10 +51,10 @@ class ManagerSettings(Base):
     )
     
     # Relationship
-    manager: Mapped["User"] = relationship(
+    director: Mapped["User"] = relationship(
         "User",
-        back_populates="manager_settings"
+        back_populates="director_settings"
     )
     
     def __repr__(self) -> str:
-        return f"<ManagerSettings(id={self.id}, manager_id={self.manager_id})>"
+        return f"<DirectorSettings(id={self.id}, director_id={self.director_id})>"

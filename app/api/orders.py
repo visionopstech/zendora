@@ -1,18 +1,89 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+from typing import Optional
 from uuid import UUID
-from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.user import User, UserRole
-from app.models.order import OrderStatus
+from app.core.exceptions import NotFoundException
 from app.dependencies.auth import get_current_user, require_super_admin
-from app.schemas.order import OrderResponse, OrderUpdate, OrderProductResponse
+from app.models.order import Order, OrderStatus
+from app.models.user import User, UserRole
+from app.schemas.common import (
+    FuneralHomeRef,
+    GiftCollectionRef,
+    PaginatedResponse,
+    PaginationParams,
+    UserRef,
+)
+from app.schemas.order import OrderProductResponse, OrderResponse, OrderUpdate
 from app.schemas.vendor import VendorDashboardStats
 from app.services.order_service import OrderService
-from app.core.exceptions import NotFoundException
 
 router = APIRouter()
+
+
+def _order_products(order: Order) -> list[OrderProductResponse]:
+    return [
+        OrderProductResponse(
+            product_id=op.product_id,
+            product_name=op.product_name,
+            product_price=op.product_price,
+            quantity=op.quantity,
+        )
+        for op in order.products
+    ]
+
+
+def _build_response(order: Order) -> OrderResponse:
+    """Serialize an order with its gifts and enriched context blocks."""
+    return OrderResponse(
+        id=order.id,
+        visitor_id=order.visitor_id,
+        gift_collection_id=order.gift_collection_id,
+        family_admin_id=order.family_admin_id,
+        funeral_home_id=order.funeral_home_id,
+        status=order.status,
+        total_amount=order.total_amount,
+        currency=order.currency,
+        created_at=order.created_at,
+        paid_at=order.paid_at,
+        products=_order_products(order),
+        visitor=UserRef.model_validate(order.visitor) if order.visitor else None,
+        family_admin=(
+            UserRef.model_validate(order.family_admin) if order.family_admin else None
+        ),
+        funeral_home=(
+            FuneralHomeRef.model_validate(order.funeral_home) if order.funeral_home else None
+        ),
+        gift_collection=(
+            GiftCollectionRef.model_validate(order.gift_collection)
+            if order.gift_collection
+            else None
+        ),
+    )
+
+
+async def _attach_vendor_context(
+    order_service: OrderService,
+    response: OrderResponse,
+    vendor_id: UUID,
+) -> OrderResponse:
+    vendor_products, vendor_amount = await order_service.get_order_vendor_products(
+        response.id, vendor_id
+    )
+    response.vendor_products = [
+        OrderProductResponse(
+            product_id=op.product_id,
+            product_name=op.product_name,
+            product_price=op.product_price,
+            quantity=op.quantity,
+        )
+        for op in vendor_products
+    ]
+    response.vendor_sales_amount = vendor_amount
+    return response
 
 
 @router.get("/vendor/dashboard", response_model=VendorDashboardStats)
@@ -21,7 +92,7 @@ async def get_vendor_dashboard(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get vendor dashboard stats: product count, total sales, order count.
+    Get vendor dashboard stats: gift count, total sales, order count.
     VENDOR role only.
     """
     if current_user.role != UserRole.VENDOR.value:
@@ -49,92 +120,101 @@ async def get_vendor_dashboard(
     )
 
 
-@router.get("", response_model=List[OrderResponse])
+@router.get("", response_model=PaginatedResponse[OrderResponse])
 async def list_orders(
-    status: Optional[OrderStatus] = Query(None, description="Filter by status"),
+    order_status: Optional[OrderStatus] = Query(
+        None, alias="status", description="Filter by order status"
+    ),
+    funeral_home_id: Optional[UUID] = Query(
+        None, description="Filter by funeral home (SUPER_ADMIN)"
+    ),
+    family_admin_id: Optional[UUID] = Query(None, description="Filter by family admin"),
+    director_id: Optional[UUID] = Query(None, description="Filter by director (SUPER_ADMIN)"),
+    gift_collection_id: Optional[UUID] = Query(None, description="Filter by gift collection"),
+    date_from: Optional[datetime] = Query(None, description="Orders created at or after"),
+    date_to: Optional[datetime] = Query(None, description="Orders created at or before"),
+    search: Optional[str] = Query(
+        None, description="Search Stripe session id, collection title and slug"
+    ),
+    pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    List orders with role-based filtering.
+    List orders, scoped by role.
     
-    - SUPER_ADMIN: Can view all orders
-    - MANAGER: Can view orders for their managed wishlists
-    - ADMIN: Can view orders for their wishlists
-    - VISITOR: Can view their own orders
-    - VENDOR: Can view orders containing their vendor's products
+    - SUPER_ADMIN: all orders, filterable by funeral home, family admin and director
+    - DIRECTOR: only their own funeral home's orders
+    - FAMILY_ADMIN: only orders on their own collections
+    - VISITOR: only their own orders
+    - VENDOR: only orders containing their gifts, enriched with vendor totals
     """
     order_service = OrderService(db)
-    
-    # Super admin can see everything
+
+    scoped: dict = {
+        "funeral_home_id": None,
+        "family_admin_id": family_admin_id,
+        "director_id": None,
+        "visitor_id": None,
+        "vendor_id": None,
+    }
+
     if current_user.role == UserRole.SUPER_ADMIN.value:
-        orders = await order_service.get_all(status=status)
-    # Manager can see orders for their managed wishlists
-    elif current_user.role == UserRole.MANAGER.value:
-        orders = await order_service.get_manager_orders(current_user.id)
-        if status:
-            orders = [o for o in orders if o.status == status.value]
-    # Admin can see orders for their wishlists
-    elif current_user.role == UserRole.ADMIN.value:
-        orders = await order_service.get_admin_orders(current_user.id)
-        if status:
-            orders = [o for o in orders if o.status == status.value]
-    # Visitor can see their own orders
+        scoped["funeral_home_id"] = funeral_home_id
+        scoped["director_id"] = director_id
+    elif current_user.role == UserRole.DIRECTOR.value:
+        if current_user.funeral_home_id:
+            scoped["funeral_home_id"] = current_user.funeral_home_id
+        else:
+            # Not assigned to a funeral home yet: fall back to their own collections.
+            scoped["director_id"] = current_user.id
+    elif current_user.role == UserRole.FAMILY_ADMIN.value:
+        scoped["family_admin_id"] = current_user.id
     elif current_user.role == UserRole.VISITOR.value:
-        orders = await order_service.get_visitor_orders(current_user.id)
-        if status:
-            orders = [o for o in orders if o.status == status.value]
-    # Vendor can see orders containing their products
+        scoped["visitor_id"] = current_user.id
     elif current_user.role == UserRole.VENDOR.value:
         if not current_user.vendor_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Vendor user must be linked to a vendor entity"
             )
-        orders = await order_service.get_vendor_orders(current_user.vendor_id, status=status)
+        scoped["vendor_id"] = current_user.vendor_id
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to view orders"
         )
-    
-    # Load order products and build response
-    result = []
+
+    orders, total = await order_service.list_orders(
+        funeral_home_id=scoped["funeral_home_id"],
+        family_admin_id=scoped["family_admin_id"],
+        director_id=scoped["director_id"],
+        gift_collection_id=gift_collection_id,
+        visitor_id=scoped["visitor_id"],
+        vendor_id=scoped["vendor_id"],
+        status=order_status,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        offset=pagination.offset,
+        limit=pagination.limit,
+    )
+
+    items = []
     for order in orders:
-        order_with_products = await order_service.get_by_id(order.id, load_products=True)
-        
-        products = [
-            OrderProductResponse(
-                product_id=op.product_id,
-                product_name=op.product_name,
-                product_price=op.product_price,
-                quantity=op.quantity
-            )
-            for op in order_with_products.products
-        ]
-        
-        order_data = OrderResponse.model_validate(order_with_products).model_dump()
-        order_data["products"] = products
-        
-        # For vendor users, add vendor_products and vendor_sales_amount
+        response = _build_response(order)
         if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
-            vendor_products, vendor_amount = await order_service.get_order_vendor_products(
-                order.id, current_user.vendor_id
+            response = await _attach_vendor_context(
+                order_service, response, current_user.vendor_id
             )
-            order_data["vendor_products"] = [
-                OrderProductResponse(
-                    product_id=op.product_id,
-                    product_name=op.product_name,
-                    product_price=op.product_price,
-                    quantity=op.quantity
-                )
-                for op in vendor_products
-            ]
-            order_data["vendor_sales_amount"] = vendor_amount
-        
-        result.append(OrderResponse(**order_data))
-    
-    return result
+        items.append(response)
+
+    return PaginatedResponse.build(
+        items=items,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{order_id}", response_model=OrderResponse)
@@ -146,11 +226,11 @@ async def get_order(
     """
     Get order by ID.
     
-    - SUPER_ADMIN: Can view any order
-    - MANAGER: Can view orders for their managed wishlists
-    - ADMIN: Can view orders for their wishlists
-    - VISITOR: Can view their own orders
-    - VENDOR: Can view orders containing their vendor's products
+    - SUPER_ADMIN: any order
+    - DIRECTOR: orders on collections in their funeral home
+    - FAMILY_ADMIN: orders on their own collections
+    - VISITOR: their own orders
+    - VENDOR: orders containing their gifts
     """
     order_service = OrderService(db)
     order = await order_service.get_by_id(order_id, load_products=True)
@@ -161,33 +241,35 @@ async def get_order(
             detail="Order not found"
         )
     
-    # Check permissions
     if current_user.role == UserRole.SUPER_ADMIN.value:
-        # Super admin can see everything
         pass
-    elif current_user.role == UserRole.MANAGER.value:
-        # Manager can see orders for their managed wishlists
-        if order.wishlist.manager_id != current_user.id:
+    elif current_user.role == UserRole.DIRECTOR.value:
+        same_funeral_home = (
+            current_user.funeral_home_id is not None
+            and order.funeral_home_id == current_user.funeral_home_id
+        )
+        owns_collection = (
+            order.gift_collection is not None
+            and order.gift_collection.director_id == current_user.id
+        )
+        if not (same_funeral_home or owns_collection):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view orders for your managed wishlists"
+                detail="You can only view orders for your own funeral home"
             )
-    elif current_user.role == UserRole.ADMIN.value:
-        # Admin can see orders for their wishlists
-        if order.admin_id != current_user.id:
+    elif current_user.role == UserRole.FAMILY_ADMIN.value:
+        if order.family_admin_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view orders for your wishlists"
+                detail="You can only view orders for your own gift collections"
             )
     elif current_user.role == UserRole.VISITOR.value:
-        # Visitor can see their own orders
         if order.visitor_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only view your own orders"
             )
     elif current_user.role == UserRole.VENDOR.value:
-        # Vendor can see orders containing their products
         if not current_user.vendor_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -199,7 +281,7 @@ async def get_order(
         if not vendor_products:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Order not found or does not contain your vendor's products"
+                detail="Order not found or does not contain your vendor's gifts"
             )
     else:
         raise HTTPException(
@@ -207,37 +289,14 @@ async def get_order(
             detail="You do not have permission to view this order"
         )
     
-    # Build response with products
-    products = [
-        OrderProductResponse(
-            product_id=op.product_id,
-            product_name=op.product_name,
-            product_price=op.product_price,
-            quantity=op.quantity
-        )
-        for op in order.products
-    ]
+    response = _build_response(order)
     
-    order_data = OrderResponse.model_validate(order).model_dump()
-    order_data["products"] = products
-    
-    # For vendor users, add vendor_products and vendor_sales_amount
     if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
-        vendor_products, vendor_amount = await order_service.get_order_vendor_products(
-            order.id, current_user.vendor_id
+        response = await _attach_vendor_context(
+            order_service, response, current_user.vendor_id
         )
-        order_data["vendor_products"] = [
-            OrderProductResponse(
-                product_id=op.product_id,
-                product_name=op.product_name,
-                product_price=op.product_price,
-                quantity=op.quantity
-            )
-            for op in vendor_products
-        ]
-        order_data["vendor_sales_amount"] = vendor_amount
     
-    return OrderResponse(**order_data)
+    return response
 
 
 @router.put("/{order_id}", response_model=OrderResponse)
@@ -265,23 +324,8 @@ async def update_order(
         
         await db.commit()
         
-        # Load products for response
         order = await order_service.get_by_id(order.id, load_products=True)
-        
-        products = [
-            OrderProductResponse(
-                product_id=op.product_id,
-                product_name=op.product_name,
-                product_price=op.product_price,
-                quantity=op.quantity
-            )
-            for op in order.products
-        ]
-        
-        order_data = OrderResponse.model_validate(order).model_dump()
-        order_data["products"] = products
-        
-        return OrderResponse(**order_data)
+        return _build_response(order)
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -298,7 +342,7 @@ async def delete_order(
     """
     Delete order (SUPER_ADMIN only).
     
-    WARNING: This is a hard delete and will cascade to order products.
+    WARNING: This is a hard delete and will cascade to order gifts.
     """
     order_service = OrderService(db)
     

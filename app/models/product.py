@@ -1,8 +1,17 @@
-import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, JSON, CheckConstraint
+from sqlalchemy import (
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    CheckConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -10,7 +19,7 @@ from app.core.database import Base
 
 
 class Product(Base):
-    """Product model for items that can be added to wishlists."""
+    """Gift model for items that can be added to gift collections."""
     
     __tablename__ = "products"
     __table_args__ = (
@@ -29,7 +38,6 @@ class Product(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    images: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
     # Timestamps
@@ -45,19 +53,28 @@ class Product(Base):
     )
     
     # Relationships
+    # Eagerly loaded: every serialized gift exposes its gallery.
+    images: Mapped[List["ProductImage"]] = relationship(
+        "ProductImage",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductImage.sort_order",
+        lazy="selectin"
+    )
+    
     vendor_associations: Mapped[List["ProductVendor"]] = relationship(
         "ProductVendor",
         back_populates="product",
         cascade="all, delete-orphan"
     )
     
-    wishlist_associations: Mapped[List["WishlistProduct"]] = relationship(
-        "WishlistProduct",
+    gift_collection_associations: Mapped[List["GiftCollectionProduct"]] = relationship(
+        "GiftCollectionProduct",
         back_populates="product"
     )
     
-    wishlist_template_associations: Mapped[List["WishlistTemplateProduct"]] = relationship(
-        "WishlistTemplateProduct",
+    default_collection_associations: Mapped[List["DefaultGiftCollectionProduct"]] = relationship(
+        "DefaultGiftCollectionProduct",
         back_populates="product"
     )
     
@@ -66,11 +83,52 @@ class Product(Base):
         back_populates="product"
     )
     
+    @property
+    def primary_image_url(self) -> Optional[str]:
+        """URL of the gallery image flagged as primary, falling back to the first one."""
+        if not self.images:
+            return None
+        for image in self.images:
+            if image.is_primary:
+                return image.url
+        return self.images[0].url
+
     def __repr__(self) -> str:
         return (
             f"<Product(id={self.id}, name={self.name}, "
             f"base_price={self.base_price}, price={self.price})>"
         )
+
+
+class ProductImage(Base):
+    """A single image in a gift's gallery. Exactly one image can be primary."""
+    
+    __tablename__ = "product_images"
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default="gen_random_uuid()"
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    alt_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        nullable=False
+    )
+    
+    product: Mapped["Product"] = relationship("Product", back_populates="images")
+    
+    def __repr__(self) -> str:
+        return f"<ProductImage(id={self.id}, product_id={self.product_id}, is_primary={self.is_primary})>"
 
 
 class ProductVendor(Base):
@@ -101,3 +159,6 @@ class ProductVendor(Base):
     
     def __repr__(self) -> str:
         return f"<ProductVendor(product_id={self.product_id}, vendor_id={self.vendor_id})>"
+
+
+Index("idx_product_images_product_id", ProductImage.product_id)

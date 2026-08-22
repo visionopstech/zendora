@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.models.user import User, UserRole
 from app.core.security import create_access_token
-from app.core.exceptions import UnauthorizedError, ConflictError
+from app.core.exceptions import UnauthorizedError, ConflictError, PermissionDenied
 from app.services.user_service import UserService
 
 
@@ -89,10 +89,14 @@ class AuthService:
         self,
         email: str,
         password: str,
-        full_name: Optional[str] = None
+        full_name: Optional[str] = None,
+        role: UserRole = UserRole.VISITOR
     ) -> tuple[User, str]:
         """
-        Register a new user with email and password.
+        Register a new user with email, password and a self-selected role.
+
+        Any role except SUPER_ADMIN may be chosen. A director is active right
+        away but has no funeral home until a super admin assigns one.
         Returns user and access token.
         """
         # Check if user already exists
@@ -100,11 +104,13 @@ class AuthService:
         if existing_user:
             raise ConflictError("User with this email already exists")
         
-        # Create new user with VISITOR role by default
+        if role == UserRole.SUPER_ADMIN:
+            raise PermissionDenied("SUPER_ADMIN accounts cannot be self-registered")
+        
         user = await self.user_service.create_user(
             email=email,
             password=password,
-            role=UserRole.VISITOR,
+            role=role,
             full_name=full_name
         )
         

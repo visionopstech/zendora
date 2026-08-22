@@ -16,8 +16,8 @@ os.environ.setdefault("SENDGRID_API_KEY", "test")
 os.environ.setdefault("SENDGRID_FROM_EMAIL", "test@example.com")
 
 from app.models.finance import Wallet, WalletType
+from app.models.gift_collection import GiftCollection
 from app.models.order import Order, OrderProduct
-from app.models.wishlist import Wishlist
 from app.schemas.product import ProductCreate
 from app.services.financial_service import FinancialService
 from app.services.order_service import OrderService
@@ -25,13 +25,13 @@ import app.services.order_service as order_service_module
 
 
 class FakeSession:
-    def __init__(self, wishlist=None):
-        self.wishlist = wishlist
+    def __init__(self, collection=None):
+        self.collection = collection
         self.added = []
 
     async def get(self, model, object_id):
-        if model is Wishlist and self.wishlist and self.wishlist.id == object_id:
-            return self.wishlist
+        if model is GiftCollection and self.collection and self.collection.id == object_id:
+            return self.collection
         return None
 
     def add(self, obj):
@@ -58,7 +58,7 @@ def test_product_schema_rejects_price_below_base_price():
 
 
 @pytest.mark.asyncio
-async def test_financial_service_calculates_manager_and_platform_profit_from_retail_price():
+async def test_financial_service_calculates_director_and_platform_profit_from_retail_price():
     service = FinancialService(FakeSession())
     product = SimpleNamespace(
         id=uuid4(),
@@ -69,13 +69,13 @@ async def test_financial_service_calculates_manager_and_platform_profit_from_ret
     commission = await service.calculate_order_commission(
         products=[product],
         quantities={product.id: 1},
-        manager_profit_percentage=Decimal("20.00"),
+        director_profit_percentage=Decimal("20.00"),
     )
 
     assert commission["base_amount"] == Decimal("10.00")
     assert commission["final_amount"] == Decimal("20.00")
     assert commission["raw_benefit_amount"] == Decimal("10.00")
-    assert commission["manager_profit_amount"] == Decimal("4.00")
+    assert commission["director_profit_amount"] == Decimal("4.00")
     assert commission["platform_profit_amount"] == Decimal("6.00")
 
 
@@ -91,26 +91,26 @@ async def test_financial_service_clamps_platform_profit_to_zero_when_commission_
     commission = await service.calculate_order_commission(
         products=[product],
         quantities={product.id: 1},
-        manager_profit_percentage=Decimal("20.00"),
+        director_profit_percentage=Decimal("20.00"),
     )
 
-    assert commission["manager_profit_amount"] == Decimal("4.00")
+    assert commission["director_profit_amount"] == Decimal("4.00")
     assert commission["platform_profit_amount"] == Decimal("0.00")
 
 
 @pytest.mark.asyncio
-async def test_order_service_create_order_creates_commission_snapshot_for_wishlist_manager(monkeypatch):
-    wishlist = SimpleNamespace(id=uuid4(), manager_id=uuid4())
-    db = FakeSession(wishlist=wishlist)
+async def test_order_service_create_order_creates_commission_snapshot_for_collection_director(monkeypatch):
+    collection = SimpleNamespace(id=uuid4(), director_id=uuid4(), funeral_home_id=uuid4())
+    db = FakeSession(collection=collection)
     financial_service = SimpleNamespace(
-        get_manager_profit_percentage=AsyncMock(return_value=Decimal("20.00")),
+        get_director_profit_percentage=AsyncMock(return_value=Decimal("20.00")),
         calculate_order_commission=AsyncMock(
             return_value={
                 "base_amount": Decimal("10.00"),
                 "final_amount": Decimal("20.00"),
                 "raw_benefit_amount": Decimal("10.00"),
-                "manager_profit_percentage": Decimal("20.00"),
-                "manager_profit_amount": Decimal("4.00"),
+                "director_profit_percentage": Decimal("20.00"),
+                "director_profit_amount": Decimal("4.00"),
                 "platform_profit_amount": Decimal("6.00"),
             }
         ),
@@ -128,19 +128,20 @@ async def test_order_service_create_order_creates_commission_snapshot_for_wishli
 
     order = await service.create_order(
         visitor_id=uuid4(),
-        wishlist_id=wishlist.id,
-        admin_id=uuid4(),
+        gift_collection_id=collection.id,
+        family_admin_id=uuid4(),
         stripe_session_id="temp_123",
         products=[product],
         quantities={product.id: 1},
     )
 
     assert order.total_amount == Decimal("20.00")
+    assert order.funeral_home_id == collection.funeral_home_id
     assert any(isinstance(item, Order) for item in db.added)
     assert any(isinstance(item, OrderProduct) for item in db.added)
     financial_service.create_order_commission_snapshot.assert_awaited_once_with(
         order_id=order.id,
-        manager_id=wishlist.manager_id,
+        director_id=collection.director_id,
         products=[product],
         quantities={product.id: 1},
     )
@@ -151,15 +152,15 @@ async def test_financial_service_credit_order_commission_is_idempotent(monkeypat
     db = FakeSession()
     service = FinancialService(db)
     commission = SimpleNamespace(
-        manager_id=uuid4(),
-        manager_profit_amount=Decimal("4.00"),
+        director_id=uuid4(),
+        director_profit_amount=Decimal("4.00"),
         platform_profit_amount=Decimal("6.00"),
         credited_at=None,
     )
-    manager_wallet = Wallet(
+    director_wallet = Wallet(
         id=uuid4(),
-        wallet_type=WalletType.MANAGER.value,
-        manager_id=commission.manager_id,
+        wallet_type=WalletType.DIRECTOR.value,
+        director_id=commission.director_id,
         balance=Decimal("0.00"),
         currency="USD",
     )
@@ -171,7 +172,7 @@ async def test_financial_service_credit_order_commission_is_idempotent(monkeypat
     )
 
     monkeypatch.setattr(service, "get_order_commission", AsyncMock(return_value=commission))
-    monkeypatch.setattr(service, "get_or_create_manager_wallet", AsyncMock(return_value=manager_wallet))
+    monkeypatch.setattr(service, "get_or_create_director_wallet", AsyncMock(return_value=director_wallet))
     monkeypatch.setattr(service, "get_or_create_platform_wallet", AsyncMock(return_value=platform_wallet))
 
     first_credit = await service.credit_order_commission(uuid4())
@@ -180,7 +181,7 @@ async def test_financial_service_credit_order_commission_is_idempotent(monkeypat
 
     assert first_credit is True
     assert second_credit is False
-    assert manager_wallet.balance == Decimal("4.00")
+    assert director_wallet.balance == Decimal("4.00")
     assert platform_wallet.balance == Decimal("6.00")
     assert commission.credited_at is not None
     assert len(db.added) == added_transactions_after_first_credit

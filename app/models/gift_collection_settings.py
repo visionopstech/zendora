@@ -7,10 +7,10 @@ from typing import Optional
 from app.core.database import Base
 
 
-class WishlistSettings(Base):
-    """Wishlist-specific settings model for UI customization."""
+class GiftCollectionSettings(Base):
+    """Gift collection specific settings for UI customization."""
     
-    __tablename__ = "wishlist_settings"
+    __tablename__ = "gift_collection_settings"
     
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
@@ -19,9 +19,9 @@ class WishlistSettings(Base):
         server_default="gen_random_uuid()"
     )
     
-    # Foreign key to wishlist
-    wishlist_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("wishlists.id", ondelete="CASCADE"),
+    # Foreign key to gift collection
+    gift_collection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("gift_collections.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
         index=True
@@ -46,10 +46,13 @@ class WishlistSettings(Base):
     )
     
     # Relationship
-    wishlist: Mapped["Wishlist"] = relationship(
-        "Wishlist",
+    gift_collection: Mapped["GiftCollection"] = relationship(
+        "GiftCollection",
         back_populates="settings"
     )
     
     def __repr__(self) -> str:
-        return f"<WishlistSettings(id={self.id}, wishlist_id={self.wishlist_id})>"
+        return (
+            f"<GiftCollectionSettings(id={self.id}, "
+            f"gift_collection_id={self.gift_collection_id})>"
+        )

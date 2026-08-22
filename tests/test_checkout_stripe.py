@@ -54,8 +54,20 @@ def test_normalize_product_images_dict():
     assert normalize_product_images(images) == ["https://cdn.example.com/main.jpg"]
 
 
+def test_normalize_product_images_gallery_objects():
+    images = [
+        SimpleNamespace(url="https://cdn.example.com/a.jpg"),
+        {"url": "https://cdn.example.com/b.jpg"},
+        SimpleNamespace(url="not-a-url"),
+    ]
+    assert normalize_product_images(images) == [
+        "https://cdn.example.com/a.jpg",
+        "https://cdn.example.com/b.jpg",
+    ]
+
+
 def test_session_amount_matches_order():
-    order = SimpleNamespace(total_amount=Decimal("45.50"))
+    order = SimpleNamespace(id=uuid4(), total_amount=Decimal("45.50"))
     assert session_amount_matches_order(order, {"amount_total": 4550}) is True
     assert session_amount_matches_order(order, {"amount_total": 4500}) is False
 

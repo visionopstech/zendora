@@ -6,7 +6,7 @@ import os
 
 from app.core.config import settings
 from app.models.user import User
-from app.models.wishlist import Wishlist
+from app.models.gift_collection import GiftCollection
 from app.models.order import Order
 
 
@@ -62,53 +62,53 @@ class EmailService:
             print(f"Error sending email to {to_email}: {str(e)}")
             return False
     
-    async def send_admin_credentials_email(
+    async def send_family_admin_credentials_email(
         self,
-        admin: User,
+        family_admin: User,
         password: str
     ) -> bool:
         """
-        Send credentials email to newly created admin.
+        Send credentials email to a newly created family admin.
         
-        Triggered when: Manager creates a wishlist and assigns a new admin.
+        Triggered when: a director creates a gift collection for a new family.
         """
-        template = jinja_env.get_template('admin_credentials.html')
+        template = jinja_env.get_template('family_admin_credentials.html')
         
         html_content = template.render(
-            admin_name=admin.full_name or 'Admin',
-            admin_email=admin.email,
+            family_admin_name=family_admin.full_name or 'there',
+            family_admin_email=family_admin.email,
             password=password,
             login_url=f"{settings.frontend_url}/login"
         )
         
         return await self.send_email(
-            to_email=admin.email,
-            subject="Welcome to Zendora - Your Admin Credentials",
+            to_email=family_admin.email,
+            subject="Welcome to Zendora - Your Family Admin Credentials",
             html_content=html_content
         )
     
-    async def send_wishlist_published_email(
+    async def send_gift_collection_published_email(
         self,
-        wishlist: Wishlist,
-        manager: User
+        gift_collection: GiftCollection,
+        director: User
     ) -> bool:
         """
-        Send notification email to manager when admin publishes wishlist.
-        
-        Triggered when: Admin publishes their wishlist.
+        Notify the director when a family admin publishes a gift collection.
         """
-        template = jinja_env.get_template('wishlist_published.html')
+        template = jinja_env.get_template('gift_collection_published.html')
         
         html_content = template.render(
-            manager_name=manager.full_name or 'Manager',
-            wishlist_title=wishlist.title or 'Untitled Wishlist',
-            wishlist_url=f"{settings.frontend_url}/w/{wishlist.public_slug}",
-            admin_email=wishlist.admin.email if wishlist.admin else 'Unknown'
+            director_name=director.full_name or 'Director',
+            collection_title=gift_collection.title or 'Untitled Gift Collection',
+            collection_url=f"{settings.frontend_url}/w/{gift_collection.public_slug}",
+            family_admin_email=(
+                gift_collection.family_admin.email if gift_collection.family_admin else 'Unknown'
+            )
         )
         
         return await self.send_email(
-            to_email=manager.email,
-            subject=f"Wishlist Published: {wishlist.title or 'Untitled'}",
+            to_email=director.email,
+            subject=f"Gift Collection Published: {gift_collection.title or 'Untitled'}",
             html_content=html_content
         )
     
@@ -117,16 +117,15 @@ class EmailService:
         order: Order
     ) -> tuple[bool, bool]:
         """
-        Send purchase confirmation emails to admin and manager.
+        Send purchase confirmation emails to the family admin and the director.
         
-        Triggered when: Visitor completes a purchase (Stripe webhook).
+        Triggered when: a visitor completes a purchase (Stripe webhook).
         
         Returns:
-            tuple[bool, bool]: (admin_sent, manager_sent)
+            tuple[bool, bool]: (family_admin_sent, director_sent)
         """
         template = jinja_env.get_template('purchase_confirmation.html')
         
-        # Prepare order details
         products = []
         for order_product in order.products:
             products.append({
@@ -136,44 +135,44 @@ class EmailService:
                 'total': float(order_product.product_price * order_product.quantity)
             })
         
-        # Send to admin
-        admin_html = template.render(
-            recipient_name=order.admin.full_name or 'Admin',
-            recipient_type='admin',
+        collection_title = order.gift_collection.title or 'Gift Collection'
+        
+        family_admin_html = template.render(
+            recipient_name=order.family_admin.full_name or 'there',
+            recipient_type='family_admin',
             visitor_name=order.visitor.full_name or order.visitor.email,
             visitor_email=order.visitor.email,
-            wishlist_title=order.wishlist.title or 'Your Wishlist',
+            collection_title=collection_title,
             products=products,
             total_amount=float(order.total_amount),
             order_id=str(order.id),
             order_date=order.paid_at.strftime('%Y-%m-%d %H:%M:%S') if order.paid_at else 'N/A'
         )
         
-        admin_sent = await self.send_email(
-            to_email=order.admin.email,
-            subject=f"New Purchase on Your Wishlist!",
-            html_content=admin_html
+        family_admin_sent = await self.send_email(
+            to_email=order.family_admin.email,
+            subject="New Purchase on Your Gift Collection",
+            html_content=family_admin_html
         )
         
-        # Send to manager
-        manager = order.wishlist.manager
-        manager_html = template.render(
-            recipient_name=manager.full_name or 'Manager',
-            recipient_type='manager',
+        director = order.gift_collection.director
+        director_html = template.render(
+            recipient_name=director.full_name or 'Director',
+            recipient_type='director',
             visitor_name=order.visitor.full_name or order.visitor.email,
             visitor_email=order.visitor.email,
-            wishlist_title=order.wishlist.title or 'Wishlist',
-            admin_email=order.admin.email,
+            collection_title=collection_title,
+            family_admin_email=order.family_admin.email,
             products=products,
             total_amount=float(order.total_amount),
             order_id=str(order.id),
             order_date=order.paid_at.strftime('%Y-%m-%d %H:%M:%S') if order.paid_at else 'N/A'
         )
         
-        manager_sent = await self.send_email(
-            to_email=manager.email,
-            subject=f"Purchase Notification: {order.wishlist.title or 'Wishlist'}",
-            html_content=manager_html
+        director_sent = await self.send_email(
+            to_email=director.email,
+            subject=f"Purchase Notification: {collection_title}",
+            html_content=director_html
         )
         
-        return admin_sent, manager_sent
+        return family_admin_sent, director_sent

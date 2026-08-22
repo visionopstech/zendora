@@ -43,6 +43,10 @@ def normalize_product_images(images: Any) -> List[str]:
 
     urls: List[str] = []
     for item in candidates:
+        if hasattr(item, "url"):
+            item = item.url
+        elif isinstance(item, dict):
+            item = item.get("url")
         if isinstance(item, str) and item.startswith(("http://", "https://")):
             urls.append(item)
         if len(urls) >= 5:
