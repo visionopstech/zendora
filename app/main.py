@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, status
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -38,8 +39,9 @@ app = FastAPI(
     description="Funeral-home gift collection platform with Stripe payments",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # Configure CORS
@@ -106,6 +108,31 @@ async def general_exception_handler(request: Request, exc: Exception):
         )
 
 
+@app.get("/openapi.json", include_in_schema=False)
+@app.get("/api/openapi.json", include_in_schema=False)
+async def openapi_json():
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False)
+@app.get("/api/docs", include_in_schema=False)
+async def swagger_ui():
+    # Relative URL so /api/docs fetches /api/openapi.json (works behind /api proxies).
+    return get_swagger_ui_html(
+        openapi_url="openapi.json",
+        title=f"{app.title} - Swagger UI",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+@app.get("/api/redoc", include_in_schema=False)
+async def redoc_ui():
+    return get_redoc_html(
+        openapi_url="openapi.json",
+        title=f"{app.title} - ReDoc",
+    )
+
+
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 async def health_check():
@@ -124,7 +151,7 @@ async def root():
     """Root endpoint with API information."""
     return {
         "message": "Welcome to Zendora API",
-        "docs": "/docs",
+        "docs": "/api/docs",
         "health": "/health",
     }
 
