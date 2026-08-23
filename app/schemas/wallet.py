@@ -26,7 +26,7 @@ class WalletResponse(BaseModel):
 
     id: UUID
     wallet_type: str
-    manager_id: Optional[UUID] = None
+    director_id: Optional[UUID] = None
     currency: str
     balance: Decimal
     created_at: datetime

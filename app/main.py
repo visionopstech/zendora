@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application
 app = FastAPI(
     title="Zendora API",
-    description="Wishlist-based gifting platform with Stripe payments",
+    description="Funeral-home gift collection platform with Stripe payments",
     version="0.1.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -130,7 +130,24 @@ async def root():
 
 
 # Import and include routers
-from app.api import auth, admin, manager, admin_wishlist, wishlist_public, checkout, webhooks, tasks, vendors, products, users, orders, wishlists, manager_settings, wishlist_settings, wishlist_templates, wallets
+from app.api import (
+    auth,
+    admin,
+    wishlist_public,
+    checkout,
+    webhooks,
+    tasks,
+    vendors,
+    products,
+    users,
+    orders,
+    wallets,
+    funeral_homes,
+    gift_collections,
+    default_gift_collections,
+    families,
+    director_settings,
+)
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(vendors.router, prefix="/api/vendors", tags=["Vendors"])
@@ -138,14 +155,13 @@ app.include_router(products.router, prefix="/api/products", tags=["Products"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(wallets.router, prefix="/api", tags=["Wallets"])
 app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
-app.include_router(wishlists.router, prefix="/api/wishlists", tags=["Wishlists"])
-app.include_router(wishlist_templates.router, prefix="/api/wishlist-templates", tags=["Wishlist Templates"])
+app.include_router(funeral_homes.router, prefix="/api/funeral-homes", tags=["Funeral Homes"])
+app.include_router(gift_collections.router, prefix="/api/gift-collections", tags=["Gift Collections"])
+app.include_router(default_gift_collections.router, prefix="/api/default-gift-collections", tags=["Default Gift Collections"])
+app.include_router(families.router, prefix="/api/families", tags=["Families"])
+app.include_router(director_settings.router, prefix="/api", tags=["Director - Settings"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
-app.include_router(manager.router, prefix="/manager", tags=["Manager - Wishlists"])
-app.include_router(manager_settings.router, prefix="/api", tags=["Manager - Settings"])
-app.include_router(wishlist_settings.router, prefix="/api", tags=["Wishlist Settings"])
-app.include_router(admin_wishlist.router, prefix="/admin", tags=["Admin - Wishlists"])
-app.include_router(wishlist_public.router, prefix="/w", tags=["Public Wishlist"])
+app.include_router(wishlist_public.router, prefix="/w", tags=["Public Gift Collection"])
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(tasks.router, prefix="/api", tags=["Background Tasks"])

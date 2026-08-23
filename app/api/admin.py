@@ -119,7 +119,7 @@ async def create_product(
             description=product_data.description,
             base_price=product_data.base_price,
             price=product_data.price,
-            images=product_data.images
+            images=[image.model_dump() for image in product_data.images] if product_data.images else None
         )
         
         await db.commit()
@@ -186,7 +186,7 @@ async def update_product(
             description=product_data.description,
             base_price=product_data.base_price,
             price=product_data.price,
-            images=product_data.images,
+            images=[image.model_dump() for image in product_data.images] if product_data.images is not None else None,
             is_active=product_data.is_active
         )
         

@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.core.exceptions import UnauthorizedError, PermissionDenied
+from app.core.exceptions import ConflictError, UnauthorizedError, PermissionDenied
 from app.models.user import User, UserRole
 from app.services.user_service import UserService
 
@@ -84,10 +84,25 @@ def require_role(*allowed_roles: UserRole):
 
 # Convenience dependencies for specific roles
 require_super_admin = require_role(UserRole.SUPER_ADMIN)
-require_manager = require_role(UserRole.MANAGER)
-require_admin = require_role(UserRole.ADMIN)
-require_manager_or_admin = require_role(UserRole.MANAGER, UserRole.ADMIN)
+require_director = require_role(UserRole.DIRECTOR)
+require_family_admin = require_role(UserRole.FAMILY_ADMIN)
+require_director_or_family_admin = require_role(UserRole.DIRECTOR, UserRole.FAMILY_ADMIN)
+require_super_admin_or_director = require_role(UserRole.SUPER_ADMIN, UserRole.DIRECTOR)
 require_vendor = require_role(UserRole.VENDOR)
+
+
+async def require_director_with_funeral_home(
+    current_user: User = Depends(require_director)
+) -> User:
+    """
+    Dependency that requires DIRECTOR role and an assigned funeral home.
+
+    A director may register and sign in before a super admin assigns them to a
+    funeral home; funeral-home-scoped endpoints reject them with 409 until then.
+    """
+    if not current_user.funeral_home_id:
+        raise ConflictError("Director is not assigned to a funeral home yet")
+    return current_user
 
 
 async def require_vendor_with_entity(current_user: User = Depends(require_vendor)) -> User:

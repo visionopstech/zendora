@@ -13,8 +13,8 @@ from app.core.database import Base
 class UserRole(str, enum.Enum):
     """User role enumeration."""
     SUPER_ADMIN = "SUPER_ADMIN"
-    MANAGER = "MANAGER"
-    ADMIN = "ADMIN"
+    DIRECTOR = "DIRECTOR"
+    FAMILY_ADMIN = "FAMILY_ADMIN"
     VISITOR = "VISITOR"
     VENDOR = "VENDOR"
 
@@ -42,9 +42,16 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
-    # Manager relationship (for ADMIN users only)
-    manager_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Director relationship (for FAMILY_ADMIN users only)
+    director_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    
+    # Funeral home the user belongs to (DIRECTOR and FAMILY_ADMIN users)
+    funeral_home_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("funeral_homes.id", ondelete="SET NULL"),
         nullable=True,
         index=True
     )
@@ -69,17 +76,32 @@ class User(Base):
     )
     
     # Relationships
-    manager: Mapped[Optional["User"]] = relationship(
+    director: Mapped[Optional["User"]] = relationship(
         "User",
         remote_side=[id],
-        foreign_keys=[manager_id],
-        back_populates="admins"
+        foreign_keys=[director_id],
+        back_populates="family_admins"
     )
     
-    admins: Mapped[List["User"]] = relationship(
+    family_admins: Mapped[List["User"]] = relationship(
         "User",
-        back_populates="manager",
-        foreign_keys=[manager_id]
+        back_populates="director",
+        foreign_keys=[director_id]
+    )
+    
+    # Funeral home this user belongs to
+    funeral_home: Mapped[Optional["FuneralHome"]] = relationship(
+        "FuneralHome",
+        back_populates="members",
+        foreign_keys=[funeral_home_id]
+    )
+    
+    # Funeral home this user is the director of (DIRECTOR users)
+    directed_funeral_home: Mapped[Optional["FuneralHome"]] = relationship(
+        "FuneralHome",
+        back_populates="director",
+        foreign_keys="FuneralHome.director_id",
+        uselist=False
     )
     
     # Vendor relationship (for VENDOR users only)
@@ -89,18 +111,18 @@ class User(Base):
         foreign_keys=[vendor_id]
     )
     
-    # Wishlists managed by this user (if MANAGER)
-    managed_wishlists: Mapped[List["Wishlist"]] = relationship(
-        "Wishlist",
-        foreign_keys="Wishlist.manager_id",
-        back_populates="manager"
+    # Gift collections overseen by this user (if DIRECTOR)
+    directed_gift_collections: Mapped[List["GiftCollection"]] = relationship(
+        "GiftCollection",
+        foreign_keys="GiftCollection.director_id",
+        back_populates="director"
     )
     
-    # Wishlists owned by this user (if ADMIN)
-    owned_wishlists: Mapped[List["Wishlist"]] = relationship(
-        "Wishlist",
-        foreign_keys="Wishlist.admin_id",
-        back_populates="admin"
+    # Gift collections owned by this user (if FAMILY_ADMIN)
+    owned_gift_collections: Mapped[List["GiftCollection"]] = relationship(
+        "GiftCollection",
+        foreign_keys="GiftCollection.family_admin_id",
+        back_populates="family_admin"
     )
     
     # Orders placed by this user (if VISITOR)
@@ -110,35 +132,35 @@ class User(Base):
         back_populates="visitor"
     )
     
-    # Manager settings (if MANAGER)
-    manager_settings: Mapped[Optional["ManagerSettings"]] = relationship(
-        "ManagerSettings",
-        back_populates="manager",
+    # Director settings (if DIRECTOR)
+    director_settings: Mapped[Optional["DirectorSettings"]] = relationship(
+        "DirectorSettings",
+        back_populates="director",
         uselist=False,
         cascade="all, delete-orphan"
     )
 
-    manager_commission: Mapped[Optional["ManagerCommission"]] = relationship(
-        "ManagerCommission",
-        back_populates="manager",
+    director_commission: Mapped[Optional["DirectorCommission"]] = relationship(
+        "DirectorCommission",
+        back_populates="director",
         uselist=False,
         cascade="all, delete-orphan"
     )
 
     wallet: Mapped[Optional["Wallet"]] = relationship(
         "Wallet",
-        back_populates="manager",
+        back_populates="director",
         uselist=False
     )
 
     order_commissions: Mapped[List["OrderCommission"]] = relationship(
         "OrderCommission",
-        back_populates="manager"
+        back_populates="director"
     )
 
-    created_wishlist_templates: Mapped[List["WishlistTemplate"]] = relationship(
-        "WishlistTemplate",
-        foreign_keys="WishlistTemplate.created_by",
+    created_default_gift_collections: Mapped[List["DefaultGiftCollection"]] = relationship(
+        "DefaultGiftCollection",
+        foreign_keys="DefaultGiftCollection.created_by",
         back_populates="creator"
     )
     
@@ -151,14 +173,14 @@ class User(Base):
         return self.role == UserRole.SUPER_ADMIN.value
     
     @property
-    def is_manager(self) -> bool:
-        """Check if user is a manager."""
-        return self.role == UserRole.MANAGER.value
+    def is_director(self) -> bool:
+        """Check if user is a funeral home director."""
+        return self.role == UserRole.DIRECTOR.value
     
     @property
-    def is_admin(self) -> bool:
-        """Check if user is an admin."""
-        return self.role == UserRole.ADMIN.value
+    def is_family_admin(self) -> bool:
+        """Check if user is a family admin."""
+        return self.role == UserRole.FAMILY_ADMIN.value
     
     @property
     def is_visitor(self) -> bool:
@@ -174,15 +196,16 @@ class User(Base):
     def profit_percentage(self) -> Optional[Decimal]:
         """Expose commission config on API responses when already loaded."""
         state = inspect(self)
-        if "manager_commission" in state.unloaded:
+        if "director_commission" in state.unloaded:
             return None
-        if not self.manager_commission:
+        if not self.director_commission:
             return None
-        return self.manager_commission.profit_percentage
+        return self.director_commission.profit_percentage
 
 
 # Index for efficient role-based queries
 Index("idx_users_role", User.role)
 Index("idx_users_email", User.email)
-Index("idx_users_manager_id", User.manager_id)
+Index("idx_users_director_id", User.director_id)
+Index("idx_users_funeral_home_id", User.funeral_home_id)
 Index("idx_users_vendor_id", User.vendor_id)

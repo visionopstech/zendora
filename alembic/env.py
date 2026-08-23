@@ -12,21 +12,23 @@ from app.core.config import settings
 # Import all models to ensure they're registered with Base.metadata
 from app.models import (  # noqa: F401
     User,
+    FuneralHome,
     Vendor,
     Product,
+    ProductImage,
     ProductVendor,
-    Wishlist,
-    WishlistProduct,
-    WishlistTemplate,
-    WishlistTemplateProduct,
+    GiftCollection,
+    GiftCollectionProduct,
+    DefaultGiftCollection,
+    DefaultGiftCollectionProduct,
     Order,
     OrderProduct,
-    ManagerCommission,
+    DirectorCommission,
     Wallet,
     WalletTransaction,
     OrderCommission,
-    ManagerSettings,
-    WishlistSettings,
+    DirectorSettings,
+    GiftCollectionSettings,
 )
 
 # this is the Alembic Config object

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-from typing import List
+from typing import List, Optional
 
 from app.core.database import get_db
 from app.models.user import User, UserRole
@@ -12,6 +12,9 @@ from app.schemas.product import (
     ProductUpdate,
     ProductResponse,
     ProductWithVendors,
+    ProductImageInput,
+    ProductImageResponse,
+    ReorderImagesRequest,
     AssociateVendorsRequest
 )
 from app.services.product_service import ProductService
@@ -33,13 +36,22 @@ def _require_product_list_access(current_user: User = Depends(get_current_user))
     """Allow back-office roles and vendor users to list products."""
     if current_user.role in {
         UserRole.SUPER_ADMIN.value,
-        UserRole.MANAGER.value,
-        UserRole.ADMIN.value,
+        UserRole.DIRECTOR.value,
+        UserRole.FAMILY_ADMIN.value,
     }:
         return current_user
     if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
         return current_user
-    raise PermissionDenied("This action requires SUPER_ADMIN, MANAGER, ADMIN, or VENDOR role")
+    raise PermissionDenied(
+        "This action requires SUPER_ADMIN, DIRECTOR, FAMILY_ADMIN, or VENDOR role"
+    )
+
+
+def _images_payload(images: Optional[List[ProductImageInput]]) -> Optional[List[dict]]:
+    """Convert gallery input models into service payloads."""
+    if images is None:
+        return None
+    return [image.model_dump() for image in images]
 
 
 @router.post("", response_model=ProductWithVendors, status_code=status.HTTP_201_CREATED)
@@ -68,12 +80,12 @@ async def create_product(
         
         # If vendor_ids provided, create product with vendors
         if vendor_ids:
-            product = await product_service.create_with_vendors(
+                product = await product_service.create_with_vendors(
                 name=product_data.name,
                 base_price=product_data.base_price,
                 description=product_data.description,
                 price=product_data.price,
-                images=product_data.images,
+                images=_images_payload(product_data.images),
                 vendor_ids=vendor_ids
             )
         else:
@@ -85,7 +97,7 @@ async def create_product(
                     base_price=product_data.base_price,
                     description=product_data.description,
                     price=product_data.price,
-                    images=product_data.images,
+                    images=_images_payload(product_data.images),
                     vendor_ids=vendor_ids
                 )
             else:
@@ -94,7 +106,7 @@ async def create_product(
                     base_price=product_data.base_price,
                     description=product_data.description,
                     price=product_data.price,
-                    images=product_data.images
+                    images=_images_payload(product_data.images)
                 )
         
         await db.commit()
@@ -209,7 +221,7 @@ async def update_product(
             description=product_data.description,
             base_price=product_data.base_price,
             price=product_data.price,
-            images=product_data.images,
+            images=_images_payload(product_data.images),
             is_active=product_data.is_active
         )
         
@@ -278,6 +290,108 @@ async def associate_product_vendors(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
+
+async def _assert_can_manage_product(
+    product_service: ProductService,
+    product_id: UUID,
+    current_user: User,
+) -> None:
+    """Ensure the caller may mutate this gift (and its gallery)."""
+    product = await product_service.get_by_id(product_id)
+    if not product:
+        raise NotFoundException("Gift not found")
+    if current_user.role == UserRole.VENDOR.value:
+        belongs = await product_service.product_belongs_to_vendor(
+            product_id, current_user.vendor_id
+        )
+        if not belongs:
+            raise NotFoundException("Gift not found")
+
+
+@router.post(
+    "/{product_id}/images",
+    response_model=ProductImageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_product_image(
+    product_id: UUID,
+    image_data: ProductImageInput,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(_require_super_admin_or_vendor),
+):
+    """Append an image to a gift's gallery. The first image is always primary."""
+    product_service = ProductService(db)
+    try:
+        await _assert_can_manage_product(product_service, product_id, current_user)
+        image = await product_service.add_image(
+            product_id=product_id,
+            url=image_data.url,
+            alt_text=image_data.alt_text,
+            is_primary=image_data.is_primary,
+            sort_order=image_data.sort_order,
+        )
+        await db.commit()
+        return ProductImageResponse.model_validate(image)
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+
+@router.delete("/{product_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_image(
+    product_id: UUID,
+    image_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(_require_super_admin_or_vendor),
+):
+    """Remove a gallery image. If it was primary, the next image is promoted."""
+    product_service = ProductService(db)
+    try:
+        await _assert_can_manage_product(product_service, product_id, current_user)
+        await product_service.delete_image(product_id, image_id)
+        await db.commit()
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.put("/{product_id}/images/reorder", response_model=List[ProductImageResponse])
+async def reorder_product_images(
+    product_id: UUID,
+    request: ReorderImagesRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(_require_super_admin_or_vendor),
+):
+    """Reorder a gift's gallery. `image_ids` must list every existing image exactly once."""
+    product_service = ProductService(db)
+    try:
+        await _assert_can_manage_product(product_service, product_id, current_user)
+        images = await product_service.reorder_images(product_id, request.image_ids)
+        await db.commit()
+        return [ProductImageResponse.model_validate(image) for image in images]
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+
+@router.put("/{product_id}/images/{image_id}/primary", response_model=ProductImageResponse)
+async def set_primary_product_image(
+    product_id: UUID,
+    image_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(_require_super_admin_or_vendor),
+):
+    """Promote one gallery image to primary and demote the others."""
+    product_service = ProductService(db)
+    try:
+        await _assert_can_manage_product(product_service, product_id, current_user)
+        image = await product_service.set_primary_image(product_id, image_id)
+        await db.commit()
+        return ProductImageResponse.model_validate(image)
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)

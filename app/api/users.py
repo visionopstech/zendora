@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-from typing import List, Optional
+from typing import Optional
 
 from app.core.database import get_db
 from app.models.user import User, UserRole
 from app.dependencies.auth import get_current_user, require_super_admin
+from app.schemas.common import PaginatedResponse, PaginationParams
 from app.schemas.user import UserCreate, UserManagementUpdate, UserResponse, ProfileUpdate
 from app.services.user_management_service import UserManagementService
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
@@ -22,7 +23,9 @@ async def create_user(
     """
     Create a new user (SUPER_ADMIN only).
     
-    - ADMIN users must have a manager_id
+    - FAMILY_ADMIN users must have a director_id
+    - VENDOR users must have a vendor_id
+    - profit_percentage is only valid for DIRECTOR users
     - Password must be at least 8 characters
     """
     user_service = UserManagementService(db)
@@ -33,7 +36,8 @@ async def create_user(
             password=user_data.password,
             role=user_data.role,
             full_name=user_data.full_name,
-            manager_id=user_data.manager_id,
+            director_id=user_data.director_id,
+            funeral_home_id=user_data.funeral_home_id,
             vendor_id=user_data.vendor_id,
             profit_percentage=user_data.profit_percentage
         )
@@ -53,44 +57,63 @@ async def create_user(
         )
 
 
-@router.get("", response_model=List[UserResponse])
+@router.get("", response_model=PaginatedResponse[UserResponse])
 async def list_users(
     role: Optional[UserRole] = Query(None, description="Filter by role"),
+    funeral_home_id: Optional[UUID] = Query(None, description="Filter by funeral home (SUPER_ADMIN)"),
+    unassigned: Optional[bool] = Query(
+        None,
+        description="True returns users with no funeral home, e.g. directors awaiting assignment",
+    ),
+    search: Optional[str] = Query(None, description="Search email and full name"),
     include_inactive: bool = False,
+    pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     List users with role-based filtering.
     
-    - SUPER_ADMIN: Can list all users
-    - MANAGER: Can only list their assigned ADMINs
-    - ADMIN: Can only view their own profile (redirects to GET /users/{id})
+    - SUPER_ADMIN: all users, filterable by role, funeral home and assignment state
+    - DIRECTOR: only their own family admins
+    - FAMILY_ADMIN / VENDOR: only themselves
     """
     user_service = UserManagementService(db)
     
-    # Super admin can see everything
     if current_user.role == UserRole.SUPER_ADMIN.value:
-        users = await user_service.get_all(
+        users, total = await user_service.get_all(
             role=role,
-            include_inactive=include_inactive
+            include_inactive=include_inactive,
+            funeral_home_id=funeral_home_id,
+            unassigned=unassigned,
+            search=search,
+            offset=pagination.offset,
+            limit=pagination.limit,
         )
-        return [UserResponse.model_validate(u) for u in users]
+        return PaginatedResponse.build(
+            items=[UserResponse.model_validate(user) for user in users],
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
     
-    # Manager can only see their admins
-    if current_user.role == UserRole.MANAGER.value:
-        users = await user_service.get_manager_admins(current_user.id)
-        return [UserResponse.model_validate(u) for u in users]
+    if current_user.role == UserRole.DIRECTOR.value:
+        users = await user_service.get_director_family_admins(current_user.id)
+        return PaginatedResponse.build(
+            items=[UserResponse.model_validate(user) for user in users],
+            total=len(users),
+            page=1,
+            page_size=max(len(users), 1),
+        )
     
-    # Admin can only see themselves
-    if current_user.role == UserRole.ADMIN.value:
-        return [UserResponse.model_validate(current_user)]
+    if current_user.role in {UserRole.FAMILY_ADMIN.value, UserRole.VENDOR.value}:
+        return PaginatedResponse.build(
+            items=[UserResponse.model_validate(current_user)],
+            total=1,
+            page=1,
+            page_size=1,
+        )
     
-    # Vendor can only see themselves
-    if current_user.role == UserRole.VENDOR.value:
-        return [UserResponse.model_validate(current_user)]
-    
-    # Other roles have no access
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to list users"
@@ -128,8 +151,8 @@ async def get_user(
     Get user by ID.
     
     - SUPER_ADMIN: Can view any user
-    - MANAGER: Can only view their assigned ADMINs
-    - ADMIN: Can only view their own profile
+    - DIRECTOR: Can only view their assigned family admins
+    - FAMILY_ADMIN / VENDOR: Can only view their own profile
     """
     user_service = UserManagementService(db)
     user = await user_service.get_by_id(user_id)
@@ -140,21 +163,20 @@ async def get_user(
             detail="User not found"
         )
     
-    # Super admin can see everything
     if current_user.role == UserRole.SUPER_ADMIN.value:
         return UserResponse.model_validate(user)
     
-    # Manager can only see their admins
-    if current_user.role == UserRole.MANAGER.value:
-        if user.manager_id == current_user.id and user.role == UserRole.ADMIN.value:
+    if current_user.role == UserRole.DIRECTOR.value:
+        if user.director_id == current_user.id and user.role == UserRole.FAMILY_ADMIN.value:
+            return UserResponse.model_validate(user)
+        if user.id == current_user.id:
             return UserResponse.model_validate(user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view your assigned admins"
+            detail="You can only view your assigned family admins"
         )
     
-    # Admin can only see themselves
-    if current_user.role == UserRole.ADMIN.value:
+    if current_user.role in {UserRole.FAMILY_ADMIN.value, UserRole.VENDOR.value}:
         if user.id == current_user.id:
             return UserResponse.model_validate(user)
         raise HTTPException(
@@ -162,16 +184,6 @@ async def get_user(
             detail="You can only view your own profile"
         )
     
-    # Vendor can only see themselves
-    if current_user.role == UserRole.VENDOR.value:
-        if user.id == current_user.id:
-            return UserResponse.model_validate(user)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view your own profile"
-        )
-    
-    # Other roles have no access
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to view this user"
@@ -188,9 +200,10 @@ async def update_user(
     """
     Update user (SUPER_ADMIN only).
     
-    - Can update email, full_name, role, is_active, manager_id, and password
+    - Can update email, full_name, role, is_active, director_id, funeral_home_id,
+      vendor_id, profit_percentage and password
     - Email must be unique
-    - ADMIN users must have a manager_id
+    - FAMILY_ADMIN users must have a director_id
     """
     user_service = UserManagementService(db)
     
@@ -201,7 +214,8 @@ async def update_user(
             full_name=user_data.full_name,
             role=user_data.role,
             is_active=user_data.is_active,
-            manager_id=user_data.manager_id,
+            director_id=user_data.director_id,
+            funeral_home_id=user_data.funeral_home_id,
             vendor_id=user_data.vendor_id,
             password=user_data.password,
             profit_percentage=user_data.profit_percentage,

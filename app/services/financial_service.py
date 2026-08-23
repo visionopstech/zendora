@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundException, ValidationError
 from app.models.finance import (
-    ManagerCommission,
+    DirectorCommission,
     OrderCommission,
     Wallet,
     WalletTransaction,
@@ -38,19 +38,19 @@ class FinancialService:
     def _quantize_percent(self, amount: Decimal) -> Decimal:
         return Decimal(amount).quantize(PERCENT_QUANTUM, rounding=ROUND_HALF_UP)
 
-    async def get_manager_commission(self, manager_id: UUID) -> Optional[ManagerCommission]:
+    async def get_director_commission(self, director_id: UUID) -> Optional[DirectorCommission]:
         result = await self.db.execute(
-            select(ManagerCommission).where(ManagerCommission.manager_id == manager_id)
+            select(DirectorCommission).where(DirectorCommission.director_id == director_id)
         )
         return result.scalar_one_or_none()
 
-    async def upsert_manager_commission(
+    async def upsert_director_commission(
         self,
-        manager_id: UUID,
+        director_id: UUID,
         profit_percentage: Optional[Decimal],
-    ) -> Optional[ManagerCommission]:
+    ) -> Optional[DirectorCommission]:
         if profit_percentage is None:
-            commission = await self.get_manager_commission(manager_id)
+            commission = await self.get_director_commission(director_id)
             if commission:
                 await self.db.delete(commission)
                 await self.db.flush()
@@ -60,12 +60,12 @@ class FinancialService:
         if normalized_percentage < 0 or normalized_percentage > 100:
             raise ValidationError("profit_percentage must be between 0 and 100")
 
-        commission = await self.get_manager_commission(manager_id)
+        commission = await self.get_director_commission(director_id)
         if commission:
             commission.profit_percentage = normalized_percentage
         else:
-            commission = ManagerCommission(
-                manager_id=manager_id,
+            commission = DirectorCommission(
+                director_id=director_id,
                 profit_percentage=normalized_percentage,
             )
             self.db.add(commission)
@@ -74,8 +74,8 @@ class FinancialService:
         await self.db.refresh(commission)
         return commission
 
-    async def get_manager_profit_percentage(self, manager_id: UUID) -> Decimal:
-        commission = await self.get_manager_commission(manager_id)
+    async def get_director_profit_percentage(self, director_id: UUID) -> Decimal:
+        commission = await self.get_director_commission(director_id)
         if not commission:
             return Decimal("0.00")
         return self._quantize_percent(commission.profit_percentage)
@@ -84,7 +84,7 @@ class FinancialService:
         self,
         products: List[Product],
         quantities: dict[UUID, int],
-        manager_profit_percentage: Decimal,
+        director_profit_percentage: Decimal,
     ) -> dict[str, Decimal]:
         base_amount = self._quantize_money(
             sum(product.base_price * quantities.get(product.id, 1) for product in products)
@@ -93,39 +93,39 @@ class FinancialService:
             sum(product.price * quantities.get(product.id, 1) for product in products)
         )
         raw_benefit_amount = self._quantize_money(final_amount - base_amount)
-        normalized_percentage = self._quantize_percent(manager_profit_percentage)
-        manager_profit_amount = self._quantize_money(
+        normalized_percentage = self._quantize_percent(director_profit_percentage)
+        director_profit_amount = self._quantize_money(
             final_amount * (normalized_percentage / Decimal("100"))
         )
         platform_profit_amount = self._quantize_money(
-            max(raw_benefit_amount - manager_profit_amount, Decimal("0.00"))
+            max(raw_benefit_amount - director_profit_amount, Decimal("0.00"))
         )
 
         return {
             "base_amount": base_amount,
             "final_amount": final_amount,
             "raw_benefit_amount": raw_benefit_amount,
-            "manager_profit_percentage": normalized_percentage,
-            "manager_profit_amount": manager_profit_amount,
+            "director_profit_percentage": normalized_percentage,
+            "director_profit_amount": director_profit_amount,
             "platform_profit_amount": platform_profit_amount,
         }
 
     async def create_order_commission_snapshot(
         self,
         order_id: UUID,
-        manager_id: UUID,
+        director_id: UUID,
         products: List[Product],
         quantities: dict[UUID, int],
     ) -> OrderCommission:
-        profit_percentage = await self.get_manager_profit_percentage(manager_id)
+        profit_percentage = await self.get_director_profit_percentage(director_id)
         commission_data = await self.calculate_order_commission(
             products=products,
             quantities=quantities,
-            manager_profit_percentage=profit_percentage,
+            director_profit_percentage=profit_percentage,
         )
         commission = OrderCommission(
             order_id=order_id,
-            manager_id=manager_id,
+            director_id=director_id,
             **commission_data,
         )
         self.db.add(commission)
@@ -147,11 +147,11 @@ class FinancialService:
         )
         return result.scalar_one_or_none()
 
-    async def get_manager_wallet(self, manager_id: UUID) -> Optional[Wallet]:
+    async def get_director_wallet(self, director_id: UUID) -> Optional[Wallet]:
         result = await self.db.execute(
             select(Wallet).where(
-                Wallet.wallet_type == WalletType.MANAGER.value,
-                Wallet.manager_id == manager_id,
+                Wallet.wallet_type == WalletType.DIRECTOR.value,
+                Wallet.director_id == director_id,
             )
         )
         return result.scalar_one_or_none()
@@ -171,14 +171,14 @@ class FinancialService:
         await self.db.refresh(wallet)
         return wallet
 
-    async def get_or_create_manager_wallet(self, manager_id: UUID) -> Wallet:
-        wallet = await self.get_manager_wallet(manager_id)
+    async def get_or_create_director_wallet(self, director_id: UUID) -> Wallet:
+        wallet = await self.get_director_wallet(director_id)
         if wallet:
             return wallet
 
         wallet = Wallet(
-            wallet_type=WalletType.MANAGER.value,
-            manager_id=manager_id,
+            wallet_type=WalletType.DIRECTOR.value,
+            director_id=director_id,
             currency="USD",
             balance=Decimal("0.00"),
         )
@@ -220,15 +220,15 @@ class FinancialService:
         if commission.credited_at:
             return False
 
-        manager_wallet = await self.get_or_create_manager_wallet(commission.manager_id)
+        director_wallet = await self.get_or_create_director_wallet(commission.director_id)
         platform_wallet = await self.get_or_create_platform_wallet()
 
         await self.create_wallet_transaction(
-            wallet=manager_wallet,
+            wallet=director_wallet,
             order_id=order_id,
-            amount=commission.manager_profit_amount,
-            description="Manager commission credit",
-            details={"beneficiary": "manager"},
+            amount=commission.director_profit_amount,
+            description="Director commission credit",
+            details={"beneficiary": "director"},
         )
         await self.create_wallet_transaction(
             wallet=platform_wallet,

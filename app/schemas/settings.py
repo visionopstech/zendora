@@ -4,8 +4,8 @@ from typing import Optional
 from datetime import datetime
 
 
-class ManagerSettingsBase(BaseModel):
-    """Base schema for manager settings."""
+class DirectorSettingsBase(BaseModel):
+    """Base schema for director settings."""
     logo_url: Optional[str] = None
     banner_image_url: Optional[str] = None
     primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
@@ -13,13 +13,13 @@ class ManagerSettingsBase(BaseModel):
     custom_message: Optional[str] = None
 
 
-class ManagerSettingsCreate(ManagerSettingsBase):
-    """Schema for creating manager settings."""
+class DirectorSettingsCreate(DirectorSettingsBase):
+    """Schema for creating director settings."""
     pass
 
 
-class ManagerSettingsUpdate(BaseModel):
-    """Schema for updating manager settings (all fields optional)."""
+class DirectorSettingsUpdate(BaseModel):
+    """Schema for updating director settings (all fields optional)."""
     logo_url: Optional[str] = None
     banner_image_url: Optional[str] = None
     primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
@@ -27,10 +27,10 @@ class ManagerSettingsUpdate(BaseModel):
     custom_message: Optional[str] = None
 
 
-class ManagerSettingsResponse(ManagerSettingsBase):
-    """Schema for manager settings response."""
+class DirectorSettingsResponse(DirectorSettingsBase):
+    """Schema for director settings response."""
     id: UUID
-    manager_id: UUID
+    director_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -38,27 +38,27 @@ class ManagerSettingsResponse(ManagerSettingsBase):
         from_attributes = True
 
 
-class WishlistSettingsBase(BaseModel):
-    """Base schema for wishlist settings."""
+class GiftCollectionSettingsBase(BaseModel):
+    """Base schema for gift collection settings."""
     banner_image_url: Optional[str] = None
     custom_message: Optional[str] = None
 
 
-class WishlistSettingsCreate(WishlistSettingsBase):
-    """Schema for creating wishlist settings."""
+class GiftCollectionSettingsCreate(GiftCollectionSettingsBase):
+    """Schema for creating gift collection settings."""
     pass
 
 
-class WishlistSettingsUpdate(BaseModel):
-    """Schema for updating wishlist settings (all fields optional)."""
+class GiftCollectionSettingsUpdate(BaseModel):
+    """Schema for updating gift collection settings (all fields optional)."""
     banner_image_url: Optional[str] = None
     custom_message: Optional[str] = None
 
 
-class WishlistSettingsResponse(WishlistSettingsBase):
-    """Schema for wishlist settings response."""
+class GiftCollectionSettingsResponse(GiftCollectionSettingsBase):
+    """Schema for gift collection settings response."""
     id: UUID
-    wishlist_id: UUID
+    gift_collection_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -67,9 +67,9 @@ class WishlistSettingsResponse(WishlistSettingsBase):
 
 
 class CombinedSettingsResponse(BaseModel):
-    """Combined settings response with manager and wishlist settings."""
-    manager: Optional[ManagerSettingsResponse] = None
-    wishlist: Optional[WishlistSettingsResponse] = None
+    """Combined settings response with director and collection settings."""
+    director: Optional[DirectorSettingsResponse] = None
+    gift_collection: Optional[GiftCollectionSettingsResponse] = None
 
     class Config:
         from_attributes = True

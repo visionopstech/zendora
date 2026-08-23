@@ -1,3 +1,4 @@
+import enum
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
@@ -5,6 +6,15 @@ from decimal import Decimal
 from datetime import datetime
 
 from app.models.user import UserRole
+
+
+class RegistrableRole(str, enum.Enum):
+    """Roles a visitor may pick when self-registering. SUPER_ADMIN is excluded."""
+
+    DIRECTOR = UserRole.DIRECTOR.value
+    FAMILY_ADMIN = UserRole.FAMILY_ADMIN.value
+    VISITOR = UserRole.VISITOR.value
+    VENDOR = UserRole.VENDOR.value
 
 
 class UserBase(BaseModel):
@@ -17,7 +27,8 @@ class UserCreate(UserBase):
     """Schema for creating a new user."""
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     role: UserRole
-    manager_id: Optional[UUID] = None
+    director_id: Optional[UUID] = None
+    funeral_home_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
     profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
 
@@ -27,6 +38,18 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     full_name: Optional[str] = None
+    role: RegistrableRole = Field(
+        default=RegistrableRole.VISITOR,
+        description="Role to register as. SUPER_ADMIN cannot be self-assigned.",
+    )
+
+
+class RegistrableRoleOption(BaseModel):
+    """A role the signup form may offer."""
+
+    value: RegistrableRole
+    label: str
+    description: str
 
 
 class UserLogin(BaseModel):
@@ -40,7 +63,8 @@ class UserResponse(UserBase):
     id: UUID
     role: UserRole
     is_active: bool
-    manager_id: Optional[UUID] = None
+    director_id: Optional[UUID] = None
+    funeral_home_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
     profit_percentage: Optional[Decimal] = None
     created_at: datetime
@@ -88,7 +112,8 @@ class UserManagementUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
-    manager_id: Optional[UUID] = None
+    director_id: Optional[UUID] = None
+    funeral_home_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
     profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
     password: Optional[str] = Field(None, min_length=8, description="New password (optional)")

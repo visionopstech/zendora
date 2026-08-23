@@ -1,10 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional, List
 from decimal import Decimal
 
+from app.models.funeral_home import FuneralHome
 from app.models.user import User, UserRole
 from app.models.vendor import Vendor
 from app.core.security import hash_password
@@ -22,7 +23,7 @@ class UserManagementService:
         """Get user by ID."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.manager_commission))
+            .options(selectinload(User.director_commission))
             .where(User.id == user_id)
         )
         return result.scalar_one_or_none()
@@ -31,7 +32,7 @@ class UserManagementService:
         """Get user by email."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.manager_commission))
+            .options(selectinload(User.director_commission))
             .where(User.email == email)
         )
         return result.scalar_one_or_none()
@@ -39,30 +40,69 @@ class UserManagementService:
     async def get_all(
         self,
         role: Optional[UserRole] = None,
-        include_inactive: bool = False
-    ) -> List[User]:
-        """Get all users, optionally filtered by role."""
-        query = select(User).options(selectinload(User.manager_commission))
+        include_inactive: bool = False,
+        funeral_home_id: Optional[UUID] = None,
+        unassigned: Optional[bool] = None,
+        search: Optional[str] = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> tuple[List[User], int]:
+        """
+        List users with filters, returning the page and the total count.
+
+        `unassigned=True` returns users without a funeral home, which is how a
+        super admin finds directors awaiting assignment.
+        """
+        filters = []
         
         if role:
-            query = query.where(User.role == role.value)
+            filters.append(User.role == (role.value if isinstance(role, UserRole) else role))
         
         if not include_inactive:
-            query = query.where(User.is_active == True)
+            filters.append(User.is_active == True)
         
+        if funeral_home_id is not None:
+            filters.append(User.funeral_home_id == funeral_home_id)
+        
+        if unassigned is True:
+            filters.append(User.funeral_home_id.is_(None))
+        elif unassigned is False:
+            filters.append(User.funeral_home_id.isnot(None))
+        
+        if search:
+            pattern = f"%{search}%"
+            filters.append(
+                or_(
+                    User.email.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                )
+            )
+        
+        count_query = select(func.count()).select_from(User)
+        if filters:
+            count_query = count_query.where(*filters)
+        total = (await self.db.execute(count_query)).scalar() or 0
+        
+        query = select(User).options(selectinload(User.director_commission))
+        if filters:
+            query = query.where(*filters)
         query = query.order_by(User.created_at.desc())
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
         
         result = await self.db.execute(query)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
     
-    async def get_manager_admins(self, manager_id: UUID) -> List[User]:
-        """Get all admins belonging to a specific manager."""
+    async def get_director_family_admins(self, director_id: UUID) -> List[User]:
+        """Get all family admins belonging to a specific director."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.manager_commission))
+            .options(selectinload(User.director_commission))
             .where(
-                User.manager_id == manager_id,
-                User.role == UserRole.ADMIN.value
+                User.director_id == director_id,
+                User.role == UserRole.FAMILY_ADMIN.value
             ).order_by(User.created_at.desc())
         )
         return list(result.scalars().all())
@@ -83,35 +123,39 @@ class UserManagementService:
         password: str,
         role: UserRole,
         full_name: Optional[str] = None,
-        manager_id: Optional[UUID] = None,
+        director_id: Optional[UUID] = None,
+        funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
         profit_percentage: Optional[Decimal] = None
     ) -> User:
         """Create a new user."""
-        # Check if email already exists
         existing_user = await self.get_by_email(email)
         if existing_user:
             raise ConflictError("User with this email already exists")
         
-        # Validate role-specific requirements
-        if role == UserRole.ADMIN and not manager_id:
-            raise PermissionDenied("ADMIN users must have a manager_id")
+        if role == UserRole.FAMILY_ADMIN and not director_id:
+            raise PermissionDenied("FAMILY_ADMIN users must have a director_id")
         
         if role == UserRole.VENDOR and not vendor_id:
             raise PermissionDenied("VENDOR users must have a vendor_id")
 
-        if profit_percentage is not None and role != UserRole.MANAGER:
-            raise PermissionDenied("profit_percentage can only be set for MANAGER users")
+        if profit_percentage is not None and role != UserRole.DIRECTOR:
+            raise PermissionDenied("profit_percentage can only be set for DIRECTOR users")
         
-        # Verify manager exists if manager_id provided
-        if manager_id:
-            manager = await self.get_by_id(manager_id)
-            if not manager:
-                raise NotFoundException("Manager not found")
-            if manager.role != UserRole.MANAGER.value:
-                raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
+        director = None
+        if director_id:
+            director = await self.get_by_id(director_id)
+            if not director:
+                raise NotFoundException("Director not found")
+            if director.role != UserRole.DIRECTOR.value:
+                raise PermissionDenied("Specified director_id must belong to a DIRECTOR user")
         
-        # Verify vendor exists if vendor_id provided
+        if funeral_home_id:
+            await self._verify_funeral_home(funeral_home_id)
+        elif director and role == UserRole.FAMILY_ADMIN:
+            # Families inherit their director's funeral home by default.
+            funeral_home_id = director.funeral_home_id
+        
         if vendor_id:
             result = await self.db.execute(select(Vendor).where(Vendor.id == vendor_id))
             vendor = result.scalar_one_or_none()
@@ -125,7 +169,8 @@ class UserManagementService:
             password_hash=password_hash,
             full_name=full_name,
             role=role.value if isinstance(role, UserRole) else role,
-            manager_id=manager_id,
+            director_id=director_id,
+            funeral_home_id=funeral_home_id,
             vendor_id=vendor_id,
             is_active=True
         )
@@ -133,9 +178,9 @@ class UserManagementService:
         self.db.add(user)
         await self.db.flush()
 
-        if role == UserRole.MANAGER and profit_percentage is not None:
+        if role == UserRole.DIRECTOR and profit_percentage is not None:
             financial_service = FinancialService(self.db)
-            await financial_service.upsert_manager_commission(user.id, profit_percentage)
+            await financial_service.upsert_director_commission(user.id, profit_percentage)
 
         user = await self.get_by_id(user.id)
         
@@ -148,7 +193,8 @@ class UserManagementService:
         full_name: Optional[str] = None,
         role: Optional[UserRole] = None,
         is_active: Optional[bool] = None,
-        manager_id: Optional[UUID] = None,
+        director_id: Optional[UUID] = None,
+        funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
         password: Optional[str] = None,
         profit_percentage: Optional[Decimal] = None,
@@ -160,7 +206,6 @@ class UserManagementService:
         if not user:
             raise NotFoundException("User not found")
         
-        # Check email uniqueness if changing email
         if email and email != user.email:
             existing_user = await self.get_by_email(email)
             if existing_user:
@@ -176,26 +221,29 @@ class UserManagementService:
             user.role = role_value
             resulting_role = role_value
             
-            # Validate role-specific requirements
-            if role == UserRole.ADMIN and not (user.manager_id or manager_id):
-                raise PermissionDenied("ADMIN users must have a manager_id")
+            if role == UserRole.FAMILY_ADMIN and not (user.director_id or director_id):
+                raise PermissionDenied("FAMILY_ADMIN users must have a director_id")
             if role == UserRole.VENDOR and not (user.vendor_id or vendor_id):
                 raise PermissionDenied("VENDOR users must have a vendor_id")
         
         if is_active is not None:
             user.is_active = is_active
         
-        if manager_id is not None:
-            # Verify manager exists
-            manager = await self.get_by_id(manager_id)
-            if not manager:
-                raise NotFoundException("Manager not found")
-            if manager.role != UserRole.MANAGER.value:
-                raise PermissionDenied("Specified manager_id must belong to a MANAGER user")
-            user.manager_id = manager_id
+        if director_id is not None:
+            director = await self.get_by_id(director_id)
+            if not director:
+                raise NotFoundException("Director not found")
+            if director.role != UserRole.DIRECTOR.value:
+                raise PermissionDenied("Specified director_id must belong to a DIRECTOR user")
+            user.director_id = director_id
+            if funeral_home_id is None and user.role == UserRole.FAMILY_ADMIN.value:
+                user.funeral_home_id = director.funeral_home_id
+        
+        if funeral_home_id is not None:
+            await self._verify_funeral_home(funeral_home_id)
+            user.funeral_home_id = funeral_home_id
         
         if vendor_id is not None:
-            # Verify vendor exists
             result = await self.db.execute(select(Vendor).where(Vendor.id == vendor_id))
             vendor = result.scalar_one_or_none()
             if not vendor:
@@ -205,15 +253,15 @@ class UserManagementService:
         if password:
             user.password_hash = hash_password(password)
 
-        if profit_percentage_provided and resulting_role != UserRole.MANAGER.value:
-            raise PermissionDenied("profit_percentage can only be set for MANAGER users")
+        if profit_percentage_provided and resulting_role != UserRole.DIRECTOR.value:
+            raise PermissionDenied("profit_percentage can only be set for DIRECTOR users")
 
         financial_service = FinancialService(self.db)
-        if resulting_role == UserRole.MANAGER.value:
+        if resulting_role == UserRole.DIRECTOR.value:
             if profit_percentage_provided:
-                await financial_service.upsert_manager_commission(user.id, profit_percentage)
+                await financial_service.upsert_director_commission(user.id, profit_percentage)
         else:
-            commission = await financial_service.get_manager_commission(user.id)
+            commission = await financial_service.get_director_commission(user.id)
             if commission:
                 await self.db.delete(commission)
         
@@ -231,3 +279,12 @@ class UserManagementService:
         
         await self.db.delete(user)
         await self.db.flush()
+    
+    async def _verify_funeral_home(self, funeral_home_id: UUID) -> FuneralHome:
+        result = await self.db.execute(
+            select(FuneralHome).where(FuneralHome.id == funeral_home_id)
+        )
+        funeral_home = result.scalar_one_or_none()
+        if not funeral_home:
+            raise NotFoundException("Funeral home not found")
+        return funeral_home

@@ -3,40 +3,39 @@ from sqlalchemy import select
 from uuid import UUID
 from typing import Optional
 
-from app.models.manager_settings import ManagerSettings
+from app.models.director_settings import DirectorSettings
 from app.core.exceptions import NotFoundException, ConflictError
 
 
-class ManagerSettingsService:
-    """Service for manager settings operations."""
+class DirectorSettingsService:
+    """Service for director settings operations."""
     
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    async def get_by_manager_id(self, manager_id: UUID) -> Optional[ManagerSettings]:
-        """Get settings for a manager."""
+    async def get_by_director_id(self, director_id: UUID) -> Optional[DirectorSettings]:
+        """Get settings for a director."""
         result = await self.db.execute(
-            select(ManagerSettings).where(ManagerSettings.manager_id == manager_id)
+            select(DirectorSettings).where(DirectorSettings.director_id == director_id)
         )
         return result.scalar_one_or_none()
     
     async def create(
         self,
-        manager_id: UUID,
+        director_id: UUID,
         logo_url: Optional[str] = None,
         banner_image_url: Optional[str] = None,
         primary_color: Optional[str] = None,
         secondary_color: Optional[str] = None,
         custom_message: Optional[str] = None
-    ) -> ManagerSettings:
-        """Create new manager settings."""
-        # Check if settings already exist
-        existing = await self.get_by_manager_id(manager_id)
+    ) -> DirectorSettings:
+        """Create new director settings."""
+        existing = await self.get_by_director_id(director_id)
         if existing:
-            raise ConflictError("Manager settings already exist. Use update instead.")
+            raise ConflictError("Director settings already exist. Use update instead.")
         
-        settings = ManagerSettings(
-            manager_id=manager_id,
+        settings = DirectorSettings(
+            director_id=director_id,
             logo_url=logo_url,
             banner_image_url=banner_image_url,
             primary_color=primary_color,
@@ -52,18 +51,18 @@ class ManagerSettingsService:
     
     async def update(
         self,
-        manager_id: UUID,
+        director_id: UUID,
         logo_url: Optional[str] = None,
         banner_image_url: Optional[str] = None,
         primary_color: Optional[str] = None,
         secondary_color: Optional[str] = None,
         custom_message: Optional[str] = None
-    ) -> ManagerSettings:
-        """Update manager settings."""
-        settings = await self.get_by_manager_id(manager_id)
+    ) -> DirectorSettings:
+        """Update director settings."""
+        settings = await self.get_by_director_id(director_id)
         
         if not settings:
-            raise NotFoundException("Manager settings not found")
+            raise NotFoundException("Director settings not found")
         
         if logo_url is not None:
             settings.logo_url = logo_url
@@ -81,12 +80,12 @@ class ManagerSettingsService:
         
         return settings
     
-    async def delete(self, manager_id: UUID) -> None:
-        """Delete manager settings."""
-        settings = await self.get_by_manager_id(manager_id)
+    async def delete(self, director_id: UUID) -> None:
+        """Delete director settings."""
+        settings = await self.get_by_director_id(director_id)
         
         if not settings:
-            raise NotFoundException("Manager settings not found")
+            raise NotFoundException("Director settings not found")
         
         await self.db.delete(settings)
         await self.db.flush()

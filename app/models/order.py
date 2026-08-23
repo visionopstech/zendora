@@ -35,15 +35,20 @@ class Order(Base):
         nullable=False,
         index=True
     )
-    wishlist_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("wishlists.id", ondelete="CASCADE"),
+    gift_collection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("gift_collections.id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
-    admin_id: Mapped[uuid.UUID] = mapped_column(
+    family_admin_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True  # Denormalized for reporting
+    )
+    funeral_home_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("funeral_homes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True  # Denormalized so orders can be filtered by funeral home
     )
     
     # Stripe information
@@ -82,15 +87,17 @@ class Order(Base):
         back_populates="orders"
     )
     
-    wishlist: Mapped["Wishlist"] = relationship(
-        "Wishlist",
+    gift_collection: Mapped["GiftCollection"] = relationship(
+        "GiftCollection",
         back_populates="orders"
     )
     
-    admin: Mapped["User"] = relationship(
+    family_admin: Mapped["User"] = relationship(
         "User",
-        foreign_keys=[admin_id]
+        foreign_keys=[family_admin_id]
     )
+    
+    funeral_home: Mapped[Optional["FuneralHome"]] = relationship("FuneralHome")
     
     products: Mapped[List["OrderProduct"]] = relationship(
         "OrderProduct",

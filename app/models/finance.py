@@ -13,7 +13,7 @@ from app.core.database import Base
 class WalletType(str, enum.Enum):
     """Wallet owner type."""
 
-    MANAGER = "MANAGER"
+    DIRECTOR = "DIRECTOR"
     PLATFORM = "PLATFORM"
 
 
@@ -24,17 +24,17 @@ class WalletTransactionType(str, enum.Enum):
     DEBIT = "DEBIT"
 
 
-class ManagerCommission(Base):
-    """Stores commission configuration for a manager."""
+class DirectorCommission(Base):
+    """Stores commission configuration for a director."""
 
-    __tablename__ = "manager_commissions"
+    __tablename__ = "director_commissions"
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
         server_default="gen_random_uuid()",
     )
-    manager_id: Mapped[uuid.UUID] = mapped_column(
+    director_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
@@ -52,17 +52,17 @@ class ManagerCommission(Base):
         nullable=True,
     )
 
-    manager: Mapped["User"] = relationship("User", back_populates="manager_commission")
+    director: Mapped["User"] = relationship("User", back_populates="director_commission")
 
     def __repr__(self) -> str:
         return (
-            f"<ManagerCommission(manager_id={self.manager_id}, "
+            f"<DirectorCommission(director_id={self.director_id}, "
             f"profit_percentage={self.profit_percentage})>"
         )
 
 
 class Wallet(Base):
-    """Internal wallet ledger for managers and the platform."""
+    """Internal wallet ledger for directors and the platform."""
 
     __tablename__ = "wallets"
 
@@ -72,7 +72,7 @@ class Wallet(Base):
         server_default="gen_random_uuid()",
     )
     wallet_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    manager_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    director_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
@@ -90,7 +90,7 @@ class Wallet(Base):
         nullable=True,
     )
 
-    manager: Mapped[Optional["User"]] = relationship("User", back_populates="wallet")
+    director: Mapped[Optional["User"]] = relationship("User", back_populates="wallet")
     transactions: Mapped[List["WalletTransaction"]] = relationship(
         "WalletTransaction",
         back_populates="wallet",
@@ -117,7 +117,7 @@ class OrderCommission(Base):
         unique=True,
         index=True,
     )
-    manager_id: Mapped[uuid.UUID] = mapped_column(
+    director_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -125,8 +125,8 @@ class OrderCommission(Base):
     base_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     final_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     raw_benefit_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    manager_profit_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
-    manager_profit_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    director_profit_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    director_profit_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     platform_profit_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     credited_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -136,12 +136,12 @@ class OrderCommission(Base):
     )
 
     order: Mapped["Order"] = relationship("Order", back_populates="commission")
-    manager: Mapped["User"] = relationship("User", back_populates="order_commissions")
+    director: Mapped["User"] = relationship("User", back_populates="order_commissions")
 
     def __repr__(self) -> str:
         return (
-            f"<OrderCommission(order_id={self.order_id}, manager_id={self.manager_id}, "
-            f"manager_profit={self.manager_profit_amount})>"
+            f"<OrderCommission(order_id={self.order_id}, director_id={self.director_id}, "
+            f"director_profit={self.director_profit_amount})>"
         )
 
 
@@ -186,4 +186,3 @@ class WalletTransaction(Base):
             f"<WalletTransaction(wallet_id={self.wallet_id}, order_id={self.order_id}, "
             f"amount={self.amount})>"
         )
-

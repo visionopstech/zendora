@@ -4,12 +4,16 @@ from sqladmin import Admin
 from app.admin.auth import AdminAuthBackend
 from app.admin.views import (
     UserAdmin,
+    FuneralHomeAdmin,
     VendorAdmin,
     ProductAdmin,
-    WishlistAdmin,
+    ProductImageAdmin,
+    GiftCollectionAdmin,
+    DefaultGiftCollectionAdmin,
     OrderAdmin,
     ProductVendorAdmin,
-    WishlistProductAdmin,
+    GiftCollectionProductAdmin,
+    DefaultGiftCollectionProductAdmin,
     OrderProductAdmin,
 )
 from app.core.config import settings
@@ -28,10 +32,8 @@ def setup_admin(app, engine):
     Returns:
         Admin: Configured SQLAdmin instance
     """
-    # Create authentication backend
     authentication_backend = AdminAuthBackend(secret_key=settings.jwt_secret)
     
-    # Create admin instance with sync engine
     admin = Admin(
         app=app,
         engine=engine,
@@ -40,16 +42,18 @@ def setup_admin(app, engine):
         authentication_backend=authentication_backend,
     )
     
-    # Register all model views
     admin.add_view(UserAdmin)
+    admin.add_view(FuneralHomeAdmin)
     admin.add_view(VendorAdmin)
     admin.add_view(ProductAdmin)
-    admin.add_view(WishlistAdmin)
+    admin.add_view(GiftCollectionAdmin)
+    admin.add_view(DefaultGiftCollectionAdmin)
     admin.add_view(OrderAdmin)
     
-    # Register junction table views (in "Associations" category)
+    admin.add_view(ProductImageAdmin)
     admin.add_view(ProductVendorAdmin)
-    admin.add_view(WishlistProductAdmin)
+    admin.add_view(GiftCollectionProductAdmin)
+    admin.add_view(DefaultGiftCollectionProductAdmin)
     admin.add_view(OrderProductAdmin)
     
     return admin
