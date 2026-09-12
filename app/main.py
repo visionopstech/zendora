@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request, status
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from pathlib import Path
 import logging
 
 from app.core.config import settings
@@ -80,6 +82,24 @@ async def zendora_exception_handler(request: Request, exc: ZendoraException):
             "error": exc.__class__.__name__,
             "message": exc.message,
             "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(UnicodeDecodeError)
+async def unicode_decode_exception_handler(request: Request, exc: UnicodeDecodeError):
+    """Binary uploads hitting a JSON body parser produce this error."""
+    logger.warning("Binary body sent to a text/JSON endpoint: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        content={
+            "error": "UnsupportedMediaType",
+            "message": (
+                "Received binary data on a JSON endpoint. "
+                "Upload images with POST /api/files as multipart/form-data "
+                "(field name: file), then send the returned url on the resource."
+            ),
+            "details": {"type": "UnicodeDecodeError"},
         },
     )
 
@@ -174,6 +194,7 @@ from app.api import (
     default_gift_collections,
     families,
     director_settings,
+    files,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
@@ -187,8 +208,13 @@ app.include_router(gift_collections.router, prefix="/api/gift-collections", tags
 app.include_router(default_gift_collections.router, prefix="/api/default-gift-collections", tags=["Default Gift Collections"])
 app.include_router(families.router, prefix="/api/families", tags=["Families"])
 app.include_router(director_settings.router, prefix="/api", tags=["Director - Settings"])
+app.include_router(files.router, prefix="/api/files", tags=["Files"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
 app.include_router(wishlist_public.router, prefix="/w", tags=["Public Gift Collection"])
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(tasks.router, prefix="/api", tags=["Background Tasks"])
+
+upload_path = Path(settings.upload_dir)
+upload_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")

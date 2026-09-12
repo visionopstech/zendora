@@ -54,6 +54,10 @@ poetry.lock
 # Alembic
 alembic/versions/*.pyc
 
+# Uploaded files
+uploads/*
+!uploads/.gitkeep
+
 # Testing
 .pytest_cache/
 .coverage

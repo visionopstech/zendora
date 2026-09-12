@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "changeme"
     
+    # Local image uploads
+    upload_dir: str = "uploads"
+    max_upload_bytes: int = 5_242_880
+
     # Environment
     environment: str = "development"
     
