@@ -115,21 +115,25 @@ class User(Base):
     directed_gift_collections: Mapped[List["GiftCollection"]] = relationship(
         "GiftCollection",
         foreign_keys="GiftCollection.director_id",
-        back_populates="director"
+        back_populates="director",
+        # Avoid ORM SET NULL on NOT NULL FKs; the DB already ON DELETE CASCADEs.
+        passive_deletes=True,
     )
     
     # Gift collections owned by this user (if FAMILY_ADMIN)
     owned_gift_collections: Mapped[List["GiftCollection"]] = relationship(
         "GiftCollection",
         foreign_keys="GiftCollection.family_admin_id",
-        back_populates="family_admin"
+        back_populates="family_admin",
+        passive_deletes=True,
     )
     
     # Orders placed by this user (if VISITOR)
     orders: Mapped[List["Order"]] = relationship(
         "Order",
         foreign_keys="Order.visitor_id",
-        back_populates="visitor"
+        back_populates="visitor",
+        passive_deletes=True,
     )
     
     # Director settings (if DIRECTOR)
@@ -150,12 +154,14 @@ class User(Base):
     wallet: Mapped[Optional["Wallet"]] = relationship(
         "Wallet",
         back_populates="director",
-        uselist=False
+        uselist=False,
+        passive_deletes=True,
     )
 
     order_commissions: Mapped[List["OrderCommission"]] = relationship(
         "OrderCommission",
-        back_populates="director"
+        back_populates="director",
+        passive_deletes=True,
     )
 
     created_default_gift_collections: Mapped[List["DefaultGiftCollection"]] = relationship(
