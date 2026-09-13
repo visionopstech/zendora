@@ -6,6 +6,7 @@ from typing import Optional
 from app.core.database import get_db
 from app.models.user import User, UserRole
 from app.dependencies.auth import get_current_user, require_super_admin
+from app.services.director_scope import director_can_read_family, is_main_director
 from app.schemas.common import PaginatedResponse, PaginationParams
 from app.schemas.user import UserCreate, UserManagementUpdate, UserResponse, ProfileUpdate
 from app.services.user_management_service import UserManagementService
@@ -35,7 +36,8 @@ async def create_user(
             email=user_data.email,
             password=user_data.password,
             role=user_data.role,
-            full_name=user_data.full_name,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
             director_id=user_data.director_id,
             funeral_home_id=user_data.funeral_home_id,
             vendor_id=user_data.vendor_id,
@@ -65,7 +67,7 @@ async def list_users(
         None,
         description="True returns users with no funeral home, e.g. directors awaiting assignment",
     ),
-    search: Optional[str] = Query(None, description="Search email and full name"),
+    search: Optional[str] = Query(None, description="Search email, first name and last name"),
     include_inactive: bool = False,
     pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
@@ -98,7 +100,12 @@ async def list_users(
         )
     
     if current_user.role == UserRole.DIRECTOR.value:
-        users = await user_service.get_director_family_admins(current_user.id)
+        if is_main_director(current_user) and current_user.funeral_home_id:
+            users = await user_service.get_funeral_home_family_admins(
+                current_user.funeral_home_id
+            )
+        else:
+            users = await user_service.get_director_family_admins(current_user.id)
         return PaginatedResponse.build(
             items=[UserResponse.model_validate(user) for user in users],
             total=len(users),
@@ -129,13 +136,13 @@ async def update_my_profile(
     """
     Update the authenticated user's own profile.
 
-    Allows any authenticated user to update their full name. Only full_name is
-    updatable via this endpoint.
+    Allows any authenticated user to update their first and last name.
     """
     user_service = UserManagementService(db)
     user = await user_service.update(
         user_id=current_user.id,
-        full_name=user_data.full_name
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
     )
     await db.commit()
     return UserResponse.model_validate(user)
@@ -167,9 +174,11 @@ async def get_user(
         return UserResponse.model_validate(user)
     
     if current_user.role == UserRole.DIRECTOR.value:
-        if user.director_id == current_user.id and user.role == UserRole.FAMILY_ADMIN.value:
-            return UserResponse.model_validate(user)
         if user.id == current_user.id:
+            return UserResponse.model_validate(user)
+        if user.role == UserRole.FAMILY_ADMIN.value and director_can_read_family(
+            current_user, user
+        ):
             return UserResponse.model_validate(user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -200,7 +209,7 @@ async def update_user(
     """
     Update user (SUPER_ADMIN only).
     
-    - Can update email, full_name, role, is_active, director_id, funeral_home_id,
+    - Can update email, first_name, last_name, role, is_active, director_id, funeral_home_id,
       vendor_id, profit_percentage and password
     - Email must be unique
     - FAMILY_ADMIN users must have a director_id
@@ -211,7 +220,8 @@ async def update_user(
         user = await user_service.update(
             user_id=user_id,
             email=user_data.email,
-            full_name=user_data.full_name,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
             role=user_data.role,
             is_active=user_data.is_active,
             director_id=user_data.director_id,

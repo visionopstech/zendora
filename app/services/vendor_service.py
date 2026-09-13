@@ -3,8 +3,10 @@ from sqlalchemy import select
 from uuid import UUID
 from typing import Optional, List
 
+from app.models.user import UserRole
 from app.models.vendor import Vendor
 from app.core.exceptions import NotFoundException, ConflictError
+from app.services.user_management_service import UserManagementService
 
 
 class VendorService:
@@ -35,20 +37,40 @@ class VendorService:
     async def create(
         self,
         name: str,
+        email: str,
+        password: str,
+        first_name: str,
+        last_name: str,
+        standard_processing_time: int,
         description: Optional[str] = None,
-        logo_url: Optional[str] = None
+        logo_url: Optional[str] = None,
     ) -> Vendor:
-        """Create a new vendor."""
+        """Create a vendor and its VENDOR login user in one transaction."""
+        user_service = UserManagementService(self.db)
+        existing_user = await user_service.get_by_email(email)
+        if existing_user:
+            raise ConflictError("User with this email already exists")
+
         vendor = Vendor(
             name=name,
             description=description,
             logo_url=logo_url,
+            standard_processing_time=standard_processing_time,
             is_active=True
         )
         
         self.db.add(vendor)
         await self.db.flush()
         await self.db.refresh(vendor)
+
+        await user_service.create(
+            email=email,
+            password=password,
+            role=UserRole.VENDOR,
+            first_name=first_name,
+            last_name=last_name,
+            vendor_id=vendor.id,
+        )
         
         return vendor
     
@@ -58,6 +80,7 @@ class VendorService:
         name: Optional[str] = None,
         description: Optional[str] = None,
         logo_url: Optional[str] = None,
+        standard_processing_time: Optional[int] = None,
         is_active: Optional[bool] = None
     ) -> Vendor:
         """Update a vendor."""
@@ -72,6 +95,8 @@ class VendorService:
             vendor.description = description
         if logo_url is not None:
             vendor.logo_url = logo_url
+        if standard_processing_time is not None:
+            vendor.standard_processing_time = standard_processing_time
         if is_active is not None:
             vendor.is_active = is_active
         

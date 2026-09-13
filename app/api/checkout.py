@@ -48,7 +48,8 @@ async def initiate_checkout(
 
     visitor = await visitor_service.get_or_create_visitor(
         email=checkout_data.visitor_email,
-        full_name=checkout_data.visitor_name,
+        first_name=checkout_data.visitor_first_name,
+        last_name=checkout_data.visitor_last_name,
     )
 
     products = await product_service.get_by_ids(checkout_data.product_ids)

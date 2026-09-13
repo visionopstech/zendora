@@ -2,9 +2,19 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
-from app.schemas.common import FuneralHomeRef, UserRef
+from app.schemas.common import DeliveryAddress, FuneralHomeRef, UserRef
+
+
+class FamilyCreate(BaseModel):
+    """Schema for a director creating a family admin account."""
+
+    first_name: str = Field(..., min_length=1, max_length=255)
+    last_name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr
+    deceased_name: str = Field(..., min_length=1, max_length=255)
+    address: DeliveryAddress
 
 
 class FamilyResponse(BaseModel):
@@ -12,7 +22,10 @@ class FamilyResponse(BaseModel):
 
     id: UUID
     email: str
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    deceased_name: Optional[str] = None
+    address: Optional[DeliveryAddress] = None
     is_active: bool
     created_at: datetime
     funeral_home: Optional[FuneralHomeRef] = None

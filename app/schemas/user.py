@@ -20,7 +20,8 @@ class RegistrableRole(str, enum.Enum):
 class UserBase(BaseModel):
     """Base user schema with common fields."""
     email: EmailStr
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -37,7 +38,8 @@ class UserRegister(BaseModel):
     """Schema for user registration."""
     email: EmailStr
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: RegistrableRole = Field(
         default=RegistrableRole.VISITOR,
         description="Role to register as. SUPER_ADMIN cannot be self-assigned.",
@@ -67,6 +69,7 @@ class UserResponse(UserBase):
     funeral_home_id: Optional[UUID] = None
     vendor_id: Optional[UUID] = None
     profit_percentage: Optional[Decimal] = None
+    is_main_director: bool = False
     created_at: datetime
     
     class Config:
@@ -97,19 +100,22 @@ class ThirdPartyLoginRequest(BaseModel):
 
 class UserUpdate(BaseModel):
     """Schema for updating user profile."""
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[EmailStr] = None
 
 
 class ProfileUpdate(BaseModel):
-    """Schema for authenticated user to update their own profile. Only full_name is updatable via this endpoint."""
-    full_name: Optional[str] = None
+    """Schema for authenticated user to update their own profile."""
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class UserManagementUpdate(BaseModel):
     """Schema for updating user (management operations)."""
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     director_id: Optional[UUID] = None
@@ -117,3 +123,18 @@ class UserManagementUpdate(BaseModel):
     vendor_id: Optional[UUID] = None
     profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
     password: Optional[str] = Field(None, min_length=8, description="New password (optional)")
+
+
+class DirectorStatusUpdate(BaseModel):
+    """Schema for toggling a director's active status."""
+    is_active: bool
+
+
+class DirectorStatisticsResponse(BaseModel):
+    """Director dashboard statistics, scoped by main vs other director."""
+
+    total_gift_collections: int
+    total_families_enrolled: int
+    orders_count: int
+    sales: Decimal
+    total_commissions: Decimal

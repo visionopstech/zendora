@@ -19,6 +19,7 @@ from app.schemas.common import (
 )
 from app.schemas.order import OrderProductResponse, OrderResponse, OrderUpdate
 from app.schemas.vendor import VendorDashboardStats
+from app.services.director_scope import director_can_read_order, director_data_scope
 from app.services.order_service import OrderService
 
 router = APIRouter()
@@ -163,11 +164,9 @@ async def list_orders(
         scoped["funeral_home_id"] = funeral_home_id
         scoped["director_id"] = director_id
     elif current_user.role == UserRole.DIRECTOR.value:
-        if current_user.funeral_home_id:
-            scoped["funeral_home_id"] = current_user.funeral_home_id
-        else:
-            # Not assigned to a funeral home yet: fall back to their own collections.
-            scoped["director_id"] = current_user.id
+        scope = director_data_scope(current_user)
+        scoped["funeral_home_id"] = scope.funeral_home_id
+        scoped["director_id"] = scope.director_id
     elif current_user.role == UserRole.FAMILY_ADMIN.value:
         scoped["family_admin_id"] = current_user.id
     elif current_user.role == UserRole.VISITOR.value:
@@ -244,18 +243,10 @@ async def get_order(
     if current_user.role == UserRole.SUPER_ADMIN.value:
         pass
     elif current_user.role == UserRole.DIRECTOR.value:
-        same_funeral_home = (
-            current_user.funeral_home_id is not None
-            and order.funeral_home_id == current_user.funeral_home_id
-        )
-        owns_collection = (
-            order.gift_collection is not None
-            and order.gift_collection.director_id == current_user.id
-        )
-        if not (same_funeral_home or owns_collection):
+        if not director_can_read_order(current_user, order):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view orders for your own funeral home"
+                detail="You can only view orders you oversee"
             )
     elif current_user.role == UserRole.FAMILY_ADMIN.value:
         if order.family_admin_id != current_user.id:

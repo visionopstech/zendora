@@ -45,7 +45,9 @@ def make_user(role: UserRole, **kwargs):
         director_id=kwargs.get("director_id"),
         funeral_home_id=kwargs.get("funeral_home_id"),
         email=kwargs.get("email", "user@example.com"),
-        full_name=kwargs.get("full_name", "Test User"),
+        first_name=kwargs.get("first_name", "Test"),
+        last_name=kwargs.get("last_name", "User"),
+        funeral_home=kwargs.get("funeral_home"),
     )
 
 
@@ -425,7 +427,8 @@ async def test_director_can_create_collection_from_default(monkeypatch):
     response = await gift_collections_api.create_gift_collection(
         collection_data=GiftCollectionCreate(
             family_admin_email=family_admin.email,
-            family_admin_full_name=family_admin.full_name,
+            family_admin_first_name=family_admin.first_name,
+            family_admin_last_name=family_admin.last_name,
             default_collection_id=default_collection.id,
             title="Director override",
         ),
@@ -491,6 +494,9 @@ async def test_list_gift_collections_is_scoped_to_director_funeral_home(monkeypa
     db = SimpleNamespace()
     funeral_home_id = uuid4()
     current_user = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    current_user.funeral_home = SimpleNamespace(
+        id=funeral_home_id, director_id=current_user.id
+    )
     collection = make_collection(funeral_home_id=funeral_home_id, director=current_user)
     service = SimpleNamespace(list_collections=AsyncMock(return_value=([collection], 1)))
     pagination = make_pagination()

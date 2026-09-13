@@ -8,6 +8,7 @@ from app.models.gift_collection import GiftCollection
 from app.dependencies.auth import get_current_user
 from app.services.gift_collection_service import GiftCollectionService
 from app.core.exceptions import PermissionDenied, NotFoundException
+from app.services.director_scope import director_can_read_collection, director_can_read_family
 
 
 async def verify_gift_collection_ownership(
@@ -45,7 +46,7 @@ async def verify_gift_collection_ownership(
         return collection
     
     if current_user.role == UserRole.DIRECTOR.value:
-        if collection.director_id != current_user.id:
+        if not director_can_read_collection(current_user, collection):
             raise PermissionDenied("You can only access gift collections you oversee")
         return collection
     
@@ -75,7 +76,7 @@ async def verify_family_admin_belongs_to_director(
     if not family_admin:
         raise NotFoundException("Family admin not found")
     
-    if family_admin.director_id != current_user.id:
+    if not director_can_read_family(current_user, family_admin):
         raise PermissionDenied("This family admin does not belong to you")
     
     return family_admin

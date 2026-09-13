@@ -194,6 +194,7 @@ from app.api import (
     default_gift_collections,
     families,
     director_settings,
+    directors,
     files,
 )
 
@@ -208,6 +209,7 @@ app.include_router(gift_collections.router, prefix="/api/gift-collections", tags
 app.include_router(default_gift_collections.router, prefix="/api/default-gift-collections", tags=["Default Gift Collections"])
 app.include_router(families.router, prefix="/api/families", tags=["Families"])
 app.include_router(director_settings.router, prefix="/api", tags=["Director - Settings"])
+app.include_router(directors.router, prefix="/api", tags=["Directors"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
 app.include_router(wishlist_public.router, prefix="/w", tags=["Public Gift Collection"])

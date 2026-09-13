@@ -29,17 +29,17 @@ class UserAdmin(ModelView, model=User):
     icon = "fa-solid fa-user"
 
     column_list = [
-        User.id, User.email, User.full_name, User.role,
+        User.id, User.email, User.first_name, User.last_name, User.role,
         User.is_active, User.director_id, User.funeral_home_id, User.vendor_id, User.created_at
     ]
-    column_searchable_list = [User.email, User.full_name]
+    column_searchable_list = [User.email, User.first_name, User.last_name]
     column_sortable_list = [User.email, User.role, User.is_active, User.created_at]
     column_default_sort = [(User.created_at, True)]
 
     column_filters = [User.role, User.is_active, User.created_at]
 
     form_columns = [
-        User.email, User.full_name, User.role,
+        User.email, User.first_name, User.last_name, User.deceased_name, User.role,
         User.is_active, User.director, User.funeral_home, User.vendor
     ]
 
@@ -69,7 +69,9 @@ class UserAdmin(ModelView, model=User):
     column_labels = {
         User.id: "ID",
         User.email: "Email",
-        User.full_name: "Full Name",
+        User.first_name: "First Name",
+        User.last_name: "Last Name",
+        User.deceased_name: "Deceased Name",
         User.role: "Role",
         User.is_active: "Active",
         User.director_id: "Director ID",
@@ -182,7 +184,7 @@ class VendorAdmin(ModelView, model=Vendor):
     icon = "fa-solid fa-store"
 
     column_list = [
-        Vendor.id, Vendor.name, Vendor.is_active, Vendor.created_at
+        Vendor.id, Vendor.name, Vendor.standard_processing_time, Vendor.is_active, Vendor.created_at
     ]
     column_searchable_list = [Vendor.name, Vendor.description]
     column_sortable_list = [Vendor.name, Vendor.is_active, Vendor.created_at]
@@ -190,14 +192,14 @@ class VendorAdmin(ModelView, model=Vendor):
 
     column_details_list = [
         Vendor.id, Vendor.name, Vendor.description, Vendor.logo_url,
-        Vendor.is_active, Vendor.product_associations,
+        Vendor.standard_processing_time, Vendor.is_active, Vendor.product_associations,
         Vendor.created_at, Vendor.updated_at
     ]
 
     column_filters = [Vendor.is_active, Vendor.created_at]
 
     form_columns = [
-        Vendor.name, Vendor.description, Vendor.logo_url, Vendor.is_active
+        Vendor.name, Vendor.description, Vendor.logo_url, Vendor.standard_processing_time, Vendor.is_active
     ]
 
     column_formatters = {
@@ -226,6 +228,7 @@ class VendorAdmin(ModelView, model=Vendor):
         Vendor.name: "Name",
         Vendor.description: "Description",
         Vendor.logo_url: "Logo URL",
+        Vendor.standard_processing_time: "Standard Processing Time",
         Vendor.is_active: "Active",
         Vendor.created_at: "Created At",
         Vendor.updated_at: "Updated At",
@@ -394,8 +397,8 @@ class GiftCollectionAdmin(ModelView, model=GiftCollection):
 
     column_formatters = {
         GiftCollection.id: lambda m, a: format_uuid(m.id),
-        GiftCollection.family_admin: lambda m, a: f"{m.family_admin.full_name} ({m.family_admin.email})" if m.family_admin else "No family admin",
-        GiftCollection.director: lambda m, a: f"{m.director.full_name} ({m.director.email})" if m.director else "No director",
+        GiftCollection.family_admin: lambda m, a: f"{m.family_admin.display_name} ({m.family_admin.email})" if m.family_admin else "No family admin",
+        GiftCollection.director: lambda m, a: f"{m.director.display_name} ({m.director.email})" if m.director else "No director",
         GiftCollection.created_at: lambda m, a: format_datetime(m.created_at),
         GiftCollection.published_at: lambda m, a: format_datetime(m.published_at) if m.published_at else "",
         GiftCollection.delivery_address: lambda m, a: format_address(m.delivery_address),
@@ -583,7 +586,7 @@ class OrderAdmin(ModelView, model=Order):
 
     column_formatters = {
         Order.id: lambda m, a: format_uuid(m.id),
-        Order.visitor: lambda m, a: f"{m.visitor.full_name} ({m.visitor.email})" if m.visitor else "No visitor",
+        Order.visitor: lambda m, a: f"{m.visitor.display_name} ({m.visitor.email})" if m.visitor else "No visitor",
         Order.gift_collection: lambda m, a: m.gift_collection.title if m.gift_collection else "No collection",
         Order.total_amount: lambda m, a: format_price(m.total_amount),
         Order.created_at: lambda m, a: format_datetime(m.created_at),

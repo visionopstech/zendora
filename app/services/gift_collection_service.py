@@ -16,6 +16,9 @@ from app.models.product import Product
 from app.models.user import User
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 
+MAX_COLLECTIONS_PER_DIRECTOR = 5
+MAX_PUBLISHED_PER_DIRECTOR = 3
+
 
 class GiftCollectionService:
     """Service for gift collection operations."""
@@ -171,6 +174,36 @@ class GiftCollectionService:
         result = await self.db.execute(query)
         return list(result.scalars().all()), total
     
+    async def count_by_director(
+        self,
+        director_id: UUID,
+        status: Optional[str] = None,
+    ) -> int:
+        """Count collections overseen by a director, optionally by status."""
+        filters = [GiftCollection.director_id == director_id]
+        if status is not None:
+            filters.append(GiftCollection.status == status)
+        result = await self.db.execute(
+            select(func.count()).select_from(GiftCollection).where(*filters)
+        )
+        return result.scalar() or 0
+
+    async def _assert_director_collection_limit(self, director_id: UUID) -> None:
+        total = await self.count_by_director(director_id)
+        if total >= MAX_COLLECTIONS_PER_DIRECTOR:
+            raise ConflictError(
+                f"A director can have at most {MAX_COLLECTIONS_PER_DIRECTOR} gift collections"
+            )
+
+    async def _assert_director_published_limit(self, director_id: UUID) -> None:
+        published = await self.count_by_director(
+            director_id, status=GiftCollectionStatus.PUBLISHED.value
+        )
+        if published >= MAX_PUBLISHED_PER_DIRECTOR:
+            raise ConflictError(
+                f"A director can have at most {MAX_PUBLISHED_PER_DIRECTOR} published gift collections"
+            )
+
     async def create(
         self,
         family_admin_id: UUID,
@@ -186,6 +219,7 @@ class GiftCollectionService:
         delivery_address: Optional[dict] = None
     ) -> GiftCollection:
         """Create a new gift collection."""
+        await self._assert_director_collection_limit(director_id)
         slug = await self._ensure_unique_slug()
         
         collection = GiftCollection(
@@ -300,6 +334,8 @@ class GiftCollectionService:
                 "You already have a published gift collection. "
                 "Please unpublish it before publishing another."
             )
+
+        await self._assert_director_published_limit(collection.director_id)
         
         collection.status = GiftCollectionStatus.PUBLISHED.value
         collection.published_at = datetime.utcnow()

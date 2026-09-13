@@ -89,7 +89,8 @@ class AuthService:
         self,
         email: str,
         password: str,
-        full_name: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
         role: UserRole = UserRole.VISITOR
     ) -> tuple[User, str]:
         """
@@ -111,7 +112,8 @@ class AuthService:
             email=email,
             password=password,
             role=role,
-            full_name=full_name
+            first_name=first_name,
+            last_name=last_name,
         )
         
         # Create access token

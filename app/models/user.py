@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, inspect
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, JSON, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -36,7 +36,12 @@ class User(Base):
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # Profile fields
-    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Family-admin profile (unused for other roles)
+    deceased_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    address: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
     # Role and status
     role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -207,6 +212,23 @@ class User(Base):
         if not self.director_commission:
             return None
         return self.director_commission.profit_percentage
+
+    @property
+    def display_name(self) -> str:
+        """Internal display name for emails and admin UI."""
+        return " ".join(part for part in (self.first_name, self.last_name) if part).strip()
+
+    @property
+    def is_main_director(self) -> bool:
+        """True when this director is the main director of their funeral home."""
+        if self.role != UserRole.DIRECTOR.value or not self.funeral_home_id:
+            return False
+        state = inspect(self)
+        if "funeral_home" not in state.unloaded and self.funeral_home is not None:
+            return self.funeral_home.director_id == self.id
+        if "directed_funeral_home" not in state.unloaded:
+            return self.directed_funeral_home is not None
+        return False
 
 
 # Index for efficient role-based queries

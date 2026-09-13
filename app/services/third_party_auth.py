@@ -5,12 +5,14 @@ import httpx
 
 from app.core.config import settings
 from app.core.exceptions import UnauthorizedError
+from app.utils.names import split_full_name
 
 
 class UserInfo(BaseModel):
     """User information returned from third-party verification."""
     email: str
-    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     user_id: Optional[str] = None  # External user ID
 
 
@@ -49,7 +51,9 @@ class DefaultThirdPartyAuthProvider(ThirdPartyAuthProvider):
         {
             "valid": true,
             "email": "user@example.com",
-            "full_name": "John Doe",  # Optional
+            "first_name": "John",      # Optional
+            "last_name": "Doe",        # Optional
+            "full_name": "John Doe",   # Optional legacy field, split if first/last absent
             "user_id": "external-id"   # Optional
         }
         """
@@ -81,9 +85,15 @@ class DefaultThirdPartyAuthProvider(ThirdPartyAuthProvider):
                 if not email:
                     raise UnauthorizedError("Email not provided by third-party")
                 
+                first_name = data.get("first_name")
+                last_name = data.get("last_name")
+                if not first_name and not last_name:
+                    first_name, last_name = split_full_name(data.get("full_name"))
+
                 return UserInfo(
                     email=email,
-                    full_name=data.get("full_name"),
+                    first_name=first_name,
+                    last_name=last_name,
                     user_id=data.get("user_id")
                 )
                 

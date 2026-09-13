@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -40,7 +40,14 @@ class FuneralHomeUpdate(BaseModel):
 
 
 class AssignDirectorRequest(BaseModel):
-    """Schema for assigning a director to a funeral home."""
+    """Schema for adding a director to a funeral home."""
+
+    user_id: UUID
+    is_main: bool = False
+
+
+class SetMainDirectorRequest(BaseModel):
+    """Schema for designating the main director of a funeral home."""
 
     user_id: UUID
 
@@ -51,6 +58,7 @@ class FuneralHomeResponse(FuneralHomeBase):
     id: UUID
     director_id: Optional[UUID] = None
     director: Optional[UserRef] = None
+    directors: List[UserRef] = Field(default_factory=list)
     is_active: bool
     family_count: int = 0
     created_at: datetime

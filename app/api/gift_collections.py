@@ -29,6 +29,11 @@ from app.services.default_gift_collection_service import DefaultGiftCollectionSe
 from app.services.gift_collection_service import GiftCollectionService
 from app.services.gift_collection_settings_service import GiftCollectionSettingsService
 from app.services.qr_service import QRCodeService
+from app.services.director_scope import (
+    director_can_read_collection,
+    director_can_read_family,
+    director_data_scope,
+)
 from app.services.user_service import UserService
 
 router = APIRouter()
@@ -56,10 +61,7 @@ def _can_read(current_user: User, collection: GiftCollection) -> bool:
     if current_user.role == UserRole.SUPER_ADMIN.value:
         return True
     if current_user.role == UserRole.DIRECTOR.value:
-        return collection.director_id == current_user.id or (
-            current_user.funeral_home_id is not None
-            and collection.funeral_home_id == current_user.funeral_home_id
-        )
+        return director_can_read_collection(current_user, collection)
     if current_user.role == UserRole.FAMILY_ADMIN.value:
         return collection.family_admin_id == current_user.id
     return False
@@ -133,9 +135,9 @@ async def create_gift_collection(
     """
     Create a gift collection, optionally copied from a default gift collection.
     
-    - DIRECTOR: creates for a family (requires family_admin_email and
-      family_admin_full_name). A new family admin account is created and its
-      credentials are emailed.
+    - DIRECTOR: creates for a family (requires family_admin_email,
+      family_admin_first_name and family_admin_last_name). A new family admin
+      account is created and its credentials are emailed.
     - FAMILY_ADMIN: creates their own collection
     - SUPER_ADMIN: creates for an existing family admin
     
@@ -153,20 +155,22 @@ async def create_gift_collection(
             if not isinstance(collection_data, GiftCollectionCreate):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Directors must provide family_admin_email and family_admin_full_name",
+                    detail="Directors must provide family_admin_email, family_admin_first_name and family_admin_last_name",
                 )
 
             family_admin = await user_service.get_by_email(collection_data.family_admin_email)
             if not family_admin:
                 family_admin, password = await user_service.create_family_admin_with_director(
                     email=collection_data.family_admin_email,
-                    full_name=collection_data.family_admin_full_name,
+                    first_name=collection_data.family_admin_first_name,
+                    last_name=collection_data.family_admin_last_name,
                     director_id=current_user.id,
                     funeral_home_id=current_user.funeral_home_id,
                 )
                 new_family_admin = (family_admin, password)
             elif family_admin.director_id != current_user.id:
-                raise PermissionDenied("This family admin belongs to another director")
+                if not director_can_read_family(current_user, family_admin):
+                    raise PermissionDenied("This family admin belongs to another director")
 
             family_admin_id = family_admin.id
             director_id = current_user.id
@@ -319,13 +323,9 @@ async def list_gift_collections(
         scoped_director_id = director_id
         scoped_family_admin_id = family_admin_id
     elif current_user.role == UserRole.DIRECTOR.value:
-        if current_user.funeral_home_id:
-            scoped_funeral_home_id = current_user.funeral_home_id
-            scoped_director_id = director_id
-        else:
-            # Not assigned to a funeral home yet: fall back to collections they own.
-            scoped_funeral_home_id = None
-            scoped_director_id = current_user.id
+        scope = director_data_scope(current_user)
+        scoped_funeral_home_id = scope.funeral_home_id
+        scoped_director_id = scope.director_id
         scoped_family_admin_id = family_admin_id
     elif current_user.role == UserRole.FAMILY_ADMIN.value:
         scoped_funeral_home_id = None

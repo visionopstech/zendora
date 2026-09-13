@@ -10,7 +10,8 @@ from app.schemas.common import FuneralHomeRef, GiftCollectionRef, UserRef
 
 class CheckoutRequest(BaseModel):
     """Schema for initiating a checkout."""
-    visitor_name: str = Field(..., min_length=1)
+    visitor_first_name: str = Field(..., min_length=1)
+    visitor_last_name: str = Field(..., min_length=1)
     visitor_email: EmailStr
     product_ids: List[UUID] = Field(..., min_length=1)
 

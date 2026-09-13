@@ -18,7 +18,7 @@ os.environ.setdefault("SENDGRID_FROM_EMAIL", "test@example.com")
 from app.api import funeral_homes as funeral_homes_api
 from app.core.exceptions import ConflictError, PermissionDenied
 from app.models.user import UserRole
-from app.schemas.funeral_home import AssignDirectorRequest, FuneralHomeCreate
+from app.schemas.funeral_home import AssignDirectorRequest, FuneralHomeCreate, SetMainDirectorRequest
 from app.services.funeral_home_service import FuneralHomeService
 
 
@@ -29,7 +29,10 @@ def make_user(role: UserRole, **kwargs):
         funeral_home_id=kwargs.get("funeral_home_id"),
         director_id=kwargs.get("director_id"),
         email=kwargs.get("email", "user@example.com"),
-        full_name=kwargs.get("full_name", "Test User"),
+        first_name=kwargs.get("first_name", "Test"),
+        last_name=kwargs.get("last_name", "User"),
+        funeral_home=kwargs.get("funeral_home"),
+        directed_funeral_home=kwargs.get("directed_funeral_home"),
     )
 
 
@@ -44,6 +47,7 @@ def make_funeral_home(**kwargs):
         logo_url=kwargs.get("logo_url"),
         director_id=kwargs.get("director_id"),
         director=kwargs.get("director"),
+        members=kwargs.get("members", []),
         is_active=kwargs.get("is_active", True),
         created_at=kwargs.get("created_at", datetime.utcnow()),
         updated_at=kwargs.get("updated_at"),
@@ -51,7 +55,7 @@ def make_funeral_home(**kwargs):
 
 
 @pytest.mark.asyncio
-async def test_assign_director_rejects_non_director_role():
+async def test_add_director_rejects_non_director_role():
     funeral_home = make_funeral_home()
     family_admin = make_user(UserRole.FAMILY_ADMIN)
     service = FuneralHomeService(AsyncMock())
@@ -61,43 +65,61 @@ async def test_assign_director_rejects_non_director_role():
     )
 
     with pytest.raises(PermissionDenied):
-        await service.assign_director(funeral_home.id, family_admin.id)
+        await service.add_director(funeral_home.id, family_admin.id)
 
 
 @pytest.mark.asyncio
-async def test_assign_director_rejects_director_already_assigned_elsewhere():
+async def test_add_director_rejects_director_already_assigned_elsewhere():
     funeral_home = make_funeral_home()
-    other_home = make_funeral_home(name="Other Chapel")
-    director = make_user(UserRole.DIRECTOR)
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
     service = FuneralHomeService(AsyncMock())
     service.get_by_id = AsyncMock(return_value=funeral_home)
-    service.get_by_director = AsyncMock(return_value=other_home)
     service.db.execute = AsyncMock(
         return_value=SimpleNamespace(scalar_one_or_none=lambda: director)
     )
 
     with pytest.raises(ConflictError) as exc:
-        await service.assign_director(funeral_home.id, director.id)
+        await service.add_director(funeral_home.id, director.id)
 
     assert "already assigned" in str(exc.value).lower()
 
 
 @pytest.mark.asyncio
-async def test_assign_director_rejects_home_that_already_has_a_director():
+async def test_add_director_allows_second_director_without_replacing_main():
     existing_director_id = uuid4()
     funeral_home = make_funeral_home(director_id=existing_director_id)
-    director = make_user(UserRole.DIRECTOR)
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=None)
     service = FuneralHomeService(AsyncMock())
     service.get_by_id = AsyncMock(return_value=funeral_home)
     service.get_by_director = AsyncMock(return_value=None)
+    service._cascade_funeral_home = AsyncMock()
+    service.db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: director)
+    )
+    service.db.flush = AsyncMock()
+
+    result = await service.add_director(funeral_home.id, director.id)
+
+    assert funeral_home.director_id == existing_director_id
+    assert director.funeral_home_id == funeral_home.id
+    assert result == funeral_home
+
+
+@pytest.mark.asyncio
+async def test_remove_director_rejects_main_director():
+    director_id = uuid4()
+    funeral_home = make_funeral_home(director_id=director_id)
+    director = make_user(UserRole.DIRECTOR, id=director_id, funeral_home_id=funeral_home.id)
+    service = FuneralHomeService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=funeral_home)
     service.db.execute = AsyncMock(
         return_value=SimpleNamespace(scalar_one_or_none=lambda: director)
     )
 
     with pytest.raises(ConflictError) as exc:
-        await service.assign_director(funeral_home.id, director.id)
+        await service.remove_director(funeral_home.id, director.id)
 
-    assert "already has a director" in str(exc.value).lower()
+    assert "main director" in str(exc.value).lower()
 
 
 @pytest.mark.asyncio
@@ -108,6 +130,7 @@ async def test_create_funeral_home_assigns_director_when_provided(monkeypatch):
     service = SimpleNamespace(
         create=AsyncMock(return_value=created),
         get_by_id=AsyncMock(return_value=created),
+        list_directors=AsyncMock(return_value=[director]),
         count_families=AsyncMock(return_value=0),
     )
     current_user = make_user(UserRole.SUPER_ADMIN)
@@ -123,6 +146,7 @@ async def test_create_funeral_home_assigns_director_when_provided(monkeypatch):
     service.create.assert_awaited_once()
     assert response.director_id == director.id
     assert response.family_count == 0
+    assert len(response.directors) == 1
 
 
 @pytest.mark.asyncio
@@ -137,19 +161,40 @@ async def test_get_my_funeral_home_returns_409_when_unassigned():
 
 
 @pytest.mark.asyncio
-async def test_assign_director_endpoint_maps_conflict(monkeypatch):
+async def test_add_director_endpoint_maps_conflict(monkeypatch):
     db = SimpleNamespace(commit=AsyncMock())
     current_user = make_user(UserRole.SUPER_ADMIN)
     service = SimpleNamespace(
-        assign_director=AsyncMock(side_effect=ConflictError("already assigned"))
+        add_director=AsyncMock(side_effect=ConflictError("already assigned"))
     )
 
     monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
 
     with pytest.raises(HTTPException) as exc:
-        await funeral_homes_api.assign_director(
+        await funeral_homes_api.add_director(
             funeral_home_id=uuid4(),
             request=AssignDirectorRequest(user_id=uuid4()),
+            db=db,
+            current_user=current_user,
+        )
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_set_main_director_endpoint_maps_conflict(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    service = SimpleNamespace(
+        set_main_director=AsyncMock(side_effect=ConflictError("must already belong"))
+    )
+
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    with pytest.raises(HTTPException) as exc:
+        await funeral_homes_api.set_main_director(
+            funeral_home_id=uuid4(),
+            request=SetMainDirectorRequest(user_id=uuid4()),
             db=db,
             current_user=current_user,
         )

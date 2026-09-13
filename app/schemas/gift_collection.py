@@ -42,7 +42,8 @@ class GiftCollectionProductInput(BaseModel):
 class GiftCollectionCreate(GiftCollectionBase):
     """Schema for a director or super admin creating a collection for a family."""
     family_admin_email: str
-    family_admin_full_name: str
+    family_admin_first_name: str
+    family_admin_last_name: str
     default_collection_id: Optional[UUID] = Field(
         None,
         description="Copy this default gift collection instead of starting from scratch",

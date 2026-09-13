@@ -15,6 +15,7 @@ from app.schemas.funeral_home import (
     FuneralHomeCreate,
     FuneralHomeResponse,
     FuneralHomeUpdate,
+    SetMainDirectorRequest,
 )
 from app.services.funeral_home_service import FuneralHomeService
 
@@ -30,6 +31,8 @@ async def _build_response(
     response.director = (
         UserRef.model_validate(funeral_home.director) if funeral_home.director else None
     )
+    directors = await service.list_directors(funeral_home.id)
+    response.directors = [UserRef.model_validate(director) for director in directors]
     response.family_count = await service.count_families(funeral_home.id)
     return response
 
@@ -240,24 +243,26 @@ async def deactivate_funeral_home(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.post("/{funeral_home_id}/director", response_model=FuneralHomeResponse)
-async def assign_director(
+@router.post("/{funeral_home_id}/directors", response_model=FuneralHomeResponse)
+async def add_director(
     funeral_home_id: UUID,
     request: AssignDirectorRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Assign a director to a funeral home (SUPER_ADMIN only).
-    
-    The user must have the DIRECTOR role and must not already run another
-    funeral home. The funeral home is cascaded onto that director's existing
-    families and gift collections.
+    Add a director to a funeral home (SUPER_ADMIN only).
+
+    The first director, or a request with is_main=true, becomes the main
+    director. Additional directors share the funeral home without replacing
+    the current main director.
     """
     service = FuneralHomeService(db)
 
     try:
-        funeral_home = await service.assign_director(funeral_home_id, request.user_id)
+        funeral_home = await service.add_director(
+            funeral_home_id, request.user_id, is_main=request.is_main
+        )
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
         return await _build_response(service, funeral_home)
@@ -269,19 +274,47 @@ async def assign_director(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.delete("/{funeral_home_id}/director", response_model=FuneralHomeResponse)
-async def unassign_director(
+@router.put("/{funeral_home_id}/main-director", response_model=FuneralHomeResponse)
+async def set_main_director(
     funeral_home_id: UUID,
+    request: SetMainDirectorRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
-    """Remove the director from a funeral home (SUPER_ADMIN only)."""
+    """Designate an existing home director as the main director (SUPER_ADMIN only)."""
     service = FuneralHomeService(db)
 
     try:
-        funeral_home = await service.unassign_director(funeral_home_id)
+        funeral_home = await service.set_main_director(funeral_home_id, request.user_id)
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
         return await _build_response(service, funeral_home)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except PermissionDenied as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.delete("/{funeral_home_id}/directors/{user_id}", response_model=FuneralHomeResponse)
+async def remove_director(
+    funeral_home_id: UUID,
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Remove a non-main director from a funeral home (SUPER_ADMIN only)."""
+    service = FuneralHomeService(db)
+
+    try:
+        funeral_home = await service.remove_director(funeral_home_id, user_id)
+        await db.commit()
+        funeral_home = await service.get_by_id(funeral_home.id)
+        return await _build_response(service, funeral_home)
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except PermissionDenied as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -79,7 +79,8 @@ async def register(
         user, token = await auth_service.register_user(
             email=registration.email,
             password=registration.password,
-            full_name=registration.full_name,
+            first_name=registration.first_name,
+            last_name=registration.last_name,
             role=UserRole(registration.role.value)
         )
         
@@ -226,7 +227,8 @@ async def redirect_login(
                 email=user_info.email,
                 password=None,  # No password for third-party users
                 role=UserRole.VISITOR,  # Default to visitor
-                full_name=user_info.full_name
+                first_name=user_info.first_name,
+                last_name=user_info.last_name,
             )
             await db.commit()
         

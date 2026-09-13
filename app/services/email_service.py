@@ -75,7 +75,7 @@ class EmailService:
         template = jinja_env.get_template('family_admin_credentials.html')
         
         html_content = template.render(
-            family_admin_name=family_admin.full_name or 'there',
+            family_admin_name=family_admin.display_name or 'there',
             family_admin_email=family_admin.email,
             password=password,
             login_url=f"{settings.frontend_url}/login"
@@ -98,7 +98,7 @@ class EmailService:
         template = jinja_env.get_template('gift_collection_published.html')
         
         html_content = template.render(
-            director_name=director.full_name or 'Director',
+            director_name=director.display_name or 'Director',
             collection_title=gift_collection.title or 'Untitled Gift Collection',
             collection_url=f"{settings.frontend_url}/w/{gift_collection.public_slug}",
             family_admin_email=(
@@ -138,9 +138,9 @@ class EmailService:
         collection_title = order.gift_collection.title or 'Gift Collection'
         
         family_admin_html = template.render(
-            recipient_name=order.family_admin.full_name or 'there',
+            recipient_name=order.family_admin.display_name or 'there',
             recipient_type='family_admin',
-            visitor_name=order.visitor.full_name or order.visitor.email,
+            visitor_name=order.visitor.display_name or order.visitor.email,
             visitor_email=order.visitor.email,
             collection_title=collection_title,
             products=products,
@@ -157,9 +157,9 @@ class EmailService:
         
         director = order.gift_collection.director
         director_html = template.render(
-            recipient_name=director.full_name or 'Director',
+            recipient_name=director.display_name or 'Director',
             recipient_type='director',
-            visitor_name=order.visitor.full_name or order.visitor.email,
+            visitor_name=order.visitor.display_name or order.visitor.email,
             visitor_email=order.visitor.email,
             collection_title=collection_title,
             family_admin_email=order.family_admin.email,

@@ -3,7 +3,6 @@ from typing import Optional
 
 from app.models.user import User, UserRole
 from app.services.user_service import UserService
-from app.core.exceptions import ConflictError
 
 
 class VisitorService:
@@ -16,42 +15,45 @@ class VisitorService:
     async def get_or_create_visitor(
         self,
         email: str,
-        full_name: str
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
     ) -> User:
         """
         Get existing visitor or create a new one.
         
         Args:
             email: Visitor email
-            full_name: Visitor full name
+            first_name: Visitor first name
+            last_name: Visitor last name
             
         Returns:
             User: Visitor user object
         """
-        # Check if user already exists
         visitor = await self.user_service.get_by_email(email)
         
         if visitor:
-            # If user exists but is not a visitor, that's a conflict
             if visitor.role != UserRole.VISITOR:
-                # For MVP, we allow the purchase but don't change the role
-                # In production, you might want to handle this differently
                 return visitor
             
-            # Update name if provided and different
-            if full_name and visitor.full_name != full_name:
-                visitor.full_name = full_name
+            updated = False
+            if first_name and visitor.first_name != first_name:
+                visitor.first_name = first_name
+                updated = True
+            if last_name and visitor.last_name != last_name:
+                visitor.last_name = last_name
+                updated = True
+            if updated:
                 await self.db.flush()
                 await self.db.refresh(visitor)
             
             return visitor
         
-        # Create new visitor
         visitor = await self.user_service.create_user(
             email=email,
-            password=None,  # No password for visitors in MVP
+            password=None,
             role=UserRole.VISITOR,
-            full_name=full_name
+            first_name=first_name,
+            last_name=last_name,
         )
         
         await self.db.flush()

@@ -16,7 +16,7 @@ from app.schemas.product import (
 )
 from app.services.vendor_service import VendorService
 from app.services.product_service import ProductService
-from app.core.exceptions import NotFoundException, ValidationError
+from app.core.exceptions import ConflictError, NotFoundException, ValidationError
 
 router = APIRouter()
 
@@ -31,15 +31,26 @@ async def create_vendor(
     """Create a new vendor (SUPER_ADMIN only)."""
     vendor_service = VendorService(db)
     
-    vendor = await vendor_service.create(
-        name=vendor_data.name,
-        description=vendor_data.description,
-        logo_url=vendor_data.logo_url
-    )
-    
-    await db.commit()
-    
-    return VendorResponse.model_validate(vendor)
+    try:
+        vendor = await vendor_service.create(
+            name=vendor_data.name,
+            email=vendor_data.email,
+            password=vendor_data.password,
+            first_name=vendor_data.first_name,
+            last_name=vendor_data.last_name,
+            standard_processing_time=vendor_data.standard_processing_time,
+            description=vendor_data.description,
+            logo_url=vendor_data.logo_url,
+        )
+        
+        await db.commit()
+        
+        return VendorResponse.model_validate(vendor)
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
 
 
 @router.get("/vendors", response_model=List[VendorResponse])
@@ -90,6 +101,7 @@ async def update_vendor(
             name=vendor_data.name,
             description=vendor_data.description,
             logo_url=vendor_data.logo_url,
+            standard_processing_time=vendor_data.standard_processing_time,
             is_active=vendor_data.is_active
         )
         

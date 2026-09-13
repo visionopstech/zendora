@@ -1,25 +1,33 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_director_with_funeral_home
 from app.models.user import User, UserRole
-from app.schemas.common import FuneralHomeRef, PaginatedResponse, PaginationParams, UserRef
-from app.schemas.family import FamilyResponse
+from app.schemas.common import DeliveryAddress, FuneralHomeRef, PaginatedResponse, PaginationParams, UserRef
+from app.schemas.family import FamilyCreate, FamilyResponse
+from app.services.director_scope import director_can_read_family, director_data_scope
 from app.services.family_service import FamilyService
+from app.services.user_service import UserService
 
 router = APIRouter()
 
 
 def _build_response(family: User, stats: dict) -> FamilyResponse:
     """Serialize a family admin together with its funeral home, director and stats."""
+    address = None
+    if family.address:
+        address = DeliveryAddress.model_validate(family.address)
     return FamilyResponse(
         id=family.id,
         email=family.email,
-        full_name=family.full_name,
+        first_name=family.first_name,
+        last_name=family.last_name,
+        deceased_name=family.deceased_name,
+        address=address,
         is_active=family.is_active,
         created_at=family.created_at,
         funeral_home=(
@@ -32,13 +40,59 @@ def _build_response(family: User, stats: dict) -> FamilyResponse:
     )
 
 
+@router.post("", response_model=FamilyResponse, status_code=status.HTTP_201_CREATED)
+async def create_family(
+    family_data: FamilyCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_director_with_funeral_home),
+):
+    """
+    Create a family admin account (DIRECTOR only).
+
+    Does not create a gift collection. Credentials are emailed to the family.
+    """
+    user_service = UserService(db)
+    existing = await user_service.get_by_email(family_data.email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists",
+        )
+
+    family, password = await user_service.create_family_admin_with_director(
+        email=family_data.email,
+        first_name=family_data.first_name,
+        last_name=family_data.last_name,
+        director_id=current_user.id,
+        funeral_home_id=current_user.funeral_home_id,
+        deceased_name=family_data.deceased_name,
+        address=family_data.address.model_dump(),
+    )
+    await db.commit()
+
+    from app.services.email_service import EmailService
+
+    email_service = EmailService()
+    background_tasks.add_task(
+        email_service.send_family_admin_credentials_email,
+        family,
+        password,
+    )
+
+    service = FamilyService(db)
+    family = await service.get_by_id(family.id)
+    stats = await service.get_collection_stats([family.id])
+    return _build_response(family, stats.get(family.id, {}))
+
+
 @router.get("", response_model=PaginatedResponse[FamilyResponse])
 async def list_families(
     funeral_home_id: Optional[UUID] = Query(
         None, description="Filter by funeral home (SUPER_ADMIN)"
     ),
     director_id: Optional[UUID] = Query(None, description="Filter by director"),
-    search: Optional[str] = Query(None, description="Search email and full name"),
+    search: Optional[str] = Query(None, description="Search email, name and deceased name"),
     is_active: Optional[bool] = Query(None),
     pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
@@ -48,7 +102,8 @@ async def list_families(
     List families (FAMILY_ADMIN users), scoped by role.
     
     - SUPER_ADMIN: all families, filterable by funeral home and director
-    - DIRECTOR: only the families of their own funeral home
+    - Main director: all families of their funeral home
+    - Other director: only families they oversee
     """
     service = FamilyService(db)
 
@@ -56,13 +111,9 @@ async def list_families(
         scoped_funeral_home_id = funeral_home_id
         scoped_director_id = director_id
     elif current_user.role == UserRole.DIRECTOR.value:
-        if current_user.funeral_home_id:
-            scoped_funeral_home_id = current_user.funeral_home_id
-            scoped_director_id = director_id
-        else:
-            # Not assigned to a funeral home yet: fall back to their own families.
-            scoped_funeral_home_id = None
-            scoped_director_id = current_user.id
+        scope = director_data_scope(current_user)
+        scoped_funeral_home_id = scope.funeral_home_id
+        scoped_director_id = scope.director_id
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -101,7 +152,8 @@ async def get_family(
     Get a single family.
     
     - SUPER_ADMIN: any family
-    - DIRECTOR: only families in their funeral home or assigned to them
+    - Main director: families in their funeral home
+    - Other director: only families they oversee
     - FAMILY_ADMIN: only themselves
     """
     service = FamilyService(db)
@@ -116,14 +168,10 @@ async def get_family(
     if current_user.role == UserRole.SUPER_ADMIN.value:
         pass
     elif current_user.role == UserRole.DIRECTOR.value:
-        same_funeral_home = (
-            current_user.funeral_home_id is not None
-            and family.funeral_home_id == current_user.funeral_home_id
-        )
-        if not (same_funeral_home or family.director_id == current_user.id):
+        if not director_can_read_family(current_user, family):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view families in your own funeral home",
+                detail="You can only view families assigned to you",
             )
     elif current_user.role == UserRole.FAMILY_ADMIN.value:
         if family.id != current_user.id:

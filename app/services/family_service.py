@@ -53,7 +53,9 @@ class FamilyService:
             filters.append(
                 or_(
                     User.email.ilike(pattern),
-                    User.full_name.ilike(pattern),
+                    User.first_name.ilike(pattern),
+                    User.last_name.ilike(pattern),
+                    User.deceased_name.ilike(pattern),
                 )
             )
 

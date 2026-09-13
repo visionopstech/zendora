@@ -23,7 +23,11 @@ class UserManagementService:
         """Get user by ID."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.director_commission))
+            .options(
+                selectinload(User.director_commission),
+                selectinload(User.funeral_home),
+                selectinload(User.directed_funeral_home),
+            )
             .where(User.id == user_id)
         )
         return result.scalar_one_or_none()
@@ -32,7 +36,11 @@ class UserManagementService:
         """Get user by email."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.director_commission))
+            .options(
+                selectinload(User.director_commission),
+                selectinload(User.funeral_home),
+                selectinload(User.directed_funeral_home),
+            )
             .where(User.email == email)
         )
         return result.scalar_one_or_none()
@@ -74,7 +82,8 @@ class UserManagementService:
             filters.append(
                 or_(
                     User.email.ilike(pattern),
-                    User.full_name.ilike(pattern),
+                    User.first_name.ilike(pattern),
+                    User.last_name.ilike(pattern),
                 )
             )
         
@@ -83,7 +92,11 @@ class UserManagementService:
             count_query = count_query.where(*filters)
         total = (await self.db.execute(count_query)).scalar() or 0
         
-        query = select(User).options(selectinload(User.director_commission))
+        query = select(User).options(
+            selectinload(User.director_commission),
+            selectinload(User.funeral_home),
+            selectinload(User.directed_funeral_home),
+        )
         if filters:
             query = query.where(*filters)
         query = query.order_by(User.created_at.desc())
@@ -95,13 +108,32 @@ class UserManagementService:
         result = await self.db.execute(query)
         return list(result.scalars().all()), total
     
+    def _user_options(self):
+        return [
+            selectinload(User.director_commission),
+            selectinload(User.funeral_home),
+            selectinload(User.directed_funeral_home),
+        ]
+
     async def get_director_family_admins(self, director_id: UUID) -> List[User]:
         """Get all family admins belonging to a specific director."""
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.director_commission))
+            .options(*self._user_options())
             .where(
                 User.director_id == director_id,
+                User.role == UserRole.FAMILY_ADMIN.value
+            ).order_by(User.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_funeral_home_family_admins(self, funeral_home_id: UUID) -> List[User]:
+        """Get all family admins belonging to a funeral home."""
+        result = await self.db.execute(
+            select(User)
+            .options(*self._user_options())
+            .where(
+                User.funeral_home_id == funeral_home_id,
                 User.role == UserRole.FAMILY_ADMIN.value
             ).order_by(User.created_at.desc())
         )
@@ -122,7 +154,8 @@ class UserManagementService:
         email: str,
         password: str,
         role: UserRole,
-        full_name: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
         director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
@@ -167,7 +200,8 @@ class UserManagementService:
         user = User(
             email=email,
             password_hash=password_hash,
-            full_name=full_name,
+            first_name=first_name,
+            last_name=last_name,
             role=role.value if isinstance(role, UserRole) else role,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
@@ -190,7 +224,8 @@ class UserManagementService:
         self,
         user_id: UUID,
         email: Optional[str] = None,
-        full_name: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
         role: Optional[UserRole] = None,
         is_active: Optional[bool] = None,
         director_id: Optional[UUID] = None,
@@ -212,8 +247,10 @@ class UserManagementService:
                 raise ConflictError("User with this email already exists")
             user.email = email
         
-        if full_name is not None:
-            user.full_name = full_name
+        if first_name is not None:
+            user.first_name = first_name
+        if last_name is not None:
+            user.last_name = last_name
         
         resulting_role = user.role
         if role is not None:

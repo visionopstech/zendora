@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional
 import secrets
@@ -15,17 +16,24 @@ class UserService:
     def __init__(self, db: AsyncSession):
         self.db = db
     
+    def _user_options(self):
+        return [
+            selectinload(User.funeral_home),
+            selectinload(User.directed_funeral_home),
+            selectinload(User.director_commission),
+        ]
+    
     async def get_by_id(self, user_id: UUID) -> Optional[User]:
         """Get user by ID."""
         result = await self.db.execute(
-            select(User).where(User.id == user_id)
+            select(User).options(*self._user_options()).where(User.id == user_id)
         )
         return result.scalar_one_or_none()
     
     async def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email."""
         result = await self.db.execute(
-            select(User).where(User.email == email)
+            select(User).options(*self._user_options()).where(User.email == email)
         )
         return result.scalar_one_or_none()
     
@@ -34,9 +42,13 @@ class UserService:
         email: str,
         password: Optional[str],
         role: UserRole,
-        full_name: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
         director_id: Optional[UUID] = None,
-        funeral_home_id: Optional[UUID] = None
+        funeral_home_id: Optional[UUID] = None,
+        vendor_id: Optional[UUID] = None,
+        deceased_name: Optional[str] = None,
+        address: Optional[dict] = None,
     ) -> User:
         """Create a new user."""
         password_hash = hash_password(password) if password else None
@@ -44,10 +56,14 @@ class UserService:
         user = User(
             email=email,
             password_hash=password_hash,
-            full_name=full_name,
+            first_name=first_name,
+            last_name=last_name,
             role=role.value if isinstance(role, UserRole) else role,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
+            vendor_id=vendor_id,
+            deceased_name=deceased_name,
+            address=address,
             is_active=True
         )
         
@@ -55,7 +71,7 @@ class UserService:
         await self.db.flush()
         await self.db.refresh(user)
         
-        return user
+        return await self.get_by_id(user.id)
     
     async def authenticate(self, email: str, password: str) -> Optional[User]:
         """Authenticate user with email and password."""
@@ -92,9 +108,12 @@ class UserService:
     async def create_family_admin_with_director(
         self,
         email: str,
-        full_name: str,
+        first_name: str,
+        last_name: str,
         director_id: UUID,
-        funeral_home_id: Optional[UUID] = None
+        funeral_home_id: Optional[UUID] = None,
+        deceased_name: Optional[str] = None,
+        address: Optional[dict] = None,
     ) -> tuple[User, str]:
         """
         Create a family admin user with a generated password.
@@ -106,9 +125,12 @@ class UserService:
             email=email,
             password=password,
             role=UserRole.FAMILY_ADMIN.value,
-            full_name=full_name,
+            first_name=first_name,
+            last_name=last_name,
             director_id=director_id,
-            funeral_home_id=funeral_home_id
+            funeral_home_id=funeral_home_id,
+            deceased_name=deceased_name,
+            address=address,
         )
         
         return user, password
@@ -116,7 +138,7 @@ class UserService:
     async def get_director_family_admins(self, director_id: UUID) -> list[User]:
         """Get all family admins belonging to a director."""
         result = await self.db.execute(
-            select(User).where(
+            select(User).options(*self._user_options()).where(
                 User.director_id == director_id,
                 User.role == UserRole.FAMILY_ADMIN.value
             )
