@@ -65,22 +65,30 @@ class Product(Base):
     vendor_associations: Mapped[List["ProductVendor"]] = relationship(
         "ProductVendor",
         back_populates="product",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     
     gift_collection_associations: Mapped[List["GiftCollectionProduct"]] = relationship(
         "GiftCollectionProduct",
-        back_populates="product"
+        back_populates="product",
+        # Junction PKs include product_id; do not SET NULL on gift delete.
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     
     default_collection_associations: Mapped[List["DefaultGiftCollectionProduct"]] = relationship(
         "DefaultGiftCollectionProduct",
-        back_populates="product"
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     
     order_items: Mapped[List["OrderProduct"]] = relationship(
         "OrderProduct",
-        back_populates="product"
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     
     @property
