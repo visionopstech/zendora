@@ -32,9 +32,9 @@ class GiftCollection(Base):
         nullable=False,
         index=True
     )
-    director_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+    director_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True
     )
     funeral_home_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -93,7 +93,7 @@ class GiftCollection(Base):
         back_populates="owned_gift_collections"
     )
     
-    director: Mapped["User"] = relationship(
+    director: Mapped[Optional["User"]] = relationship(
         "User",
         foreign_keys=[director_id],
         back_populates="directed_gift_collections"

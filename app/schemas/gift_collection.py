@@ -135,7 +135,7 @@ class GiftCollectionResponse(GiftCollectionBase):
     """Schema for gift collection response."""
     id: UUID
     family_admin_id: UUID
-    director_id: UUID
+    director_id: Optional[UUID] = None
     funeral_home_id: Optional[UUID] = None
     source_default_collection_id: Optional[UUID] = None
     public_slug: str

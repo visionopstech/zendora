@@ -113,11 +113,14 @@ class FinancialService:
     async def create_order_commission_snapshot(
         self,
         order_id: UUID,
-        director_id: UUID,
+        director_id: Optional[UUID],
         products: List[Product],
         quantities: dict[UUID, int],
     ) -> OrderCommission:
-        profit_percentage = await self.get_director_profit_percentage(director_id)
+        if director_id:
+            profit_percentage = await self.get_director_profit_percentage(director_id)
+        else:
+            profit_percentage = Decimal("0.00")
         commission_data = await self.calculate_order_commission(
             products=products,
             quantities=quantities,
@@ -220,16 +223,16 @@ class FinancialService:
         if commission.credited_at:
             return False
 
-        director_wallet = await self.get_or_create_director_wallet(commission.director_id)
+        if commission.director_id:
+            director_wallet = await self.get_or_create_director_wallet(commission.director_id)
+            await self.create_wallet_transaction(
+                wallet=director_wallet,
+                order_id=order_id,
+                amount=commission.director_profit_amount,
+                description="Director commission credit",
+                details={"beneficiary": "director"},
+            )
         platform_wallet = await self.get_or_create_platform_wallet()
-
-        await self.create_wallet_transaction(
-            wallet=director_wallet,
-            order_id=order_id,
-            amount=commission.director_profit_amount,
-            description="Director commission credit",
-            details={"beneficiary": "director"},
-        )
         await self.create_wallet_transaction(
             wallet=platform_wallet,
             order_id=order_id,

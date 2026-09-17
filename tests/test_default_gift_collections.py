@@ -490,6 +490,50 @@ async def test_family_admin_can_create_manual_collection_with_products(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_family_admin_without_director_can_create_collection(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
+    current_user = make_user(UserRole.FAMILY_ADMIN, director_id=None, funeral_home_id=None)
+    created_collection = make_collection(
+        family_admin_id=current_user.id,
+        director_id=None,
+        funeral_home_id=None,
+        family_admin=current_user,
+    )
+    collection_service = SimpleNamespace(
+        create_with_products=AsyncMock(return_value=created_collection),
+        create=AsyncMock(),
+        get_by_id=AsyncMock(return_value=created_collection),
+    )
+
+    monkeypatch.setattr(
+        gift_collections_api, "GiftCollectionService", lambda _: collection_service
+    )
+    monkeypatch.setattr(
+        gift_collections_api,
+        "DefaultGiftCollectionService",
+        lambda _: SimpleNamespace(get_by_id=AsyncMock()),
+    )
+    monkeypatch.setattr(
+        gift_collections_api, "UserService", lambda _: SimpleNamespace()
+    )
+
+    response = await gift_collections_api.create_gift_collection(
+        collection_data=GiftCollectionCreateByFamilyAdmin(
+            title="Unassigned collection",
+            products=[{"product_id": uuid4(), "quantity": 1}],
+        ),
+        background_tasks=BackgroundTasks(),
+        db=db,
+        current_user=current_user,
+    )
+
+    collection_service.create_with_products.assert_awaited_once()
+    assert collection_service.create_with_products.await_args.kwargs["director_id"] is None
+    assert response.director_id is None
+    assert response.family_admin_id == current_user.id
+
+
+@pytest.mark.asyncio
 async def test_list_gift_collections_is_scoped_to_director_funeral_home(monkeypatch):
     db = SimpleNamespace()
     funeral_home_id = uuid4()

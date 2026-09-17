@@ -159,6 +159,42 @@ async def test_publish_rejects_fourth_published_collection_for_director():
 
 
 @pytest.mark.asyncio
+async def test_create_without_director_skips_director_collection_limit():
+    service = GiftCollectionService(AsyncMock())
+    service.count_by_director = AsyncMock(return_value=MAX_COLLECTIONS_PER_DIRECTOR)
+    service._ensure_unique_slug = AsyncMock(return_value="slug123abcde")
+    service.db.add = lambda _collection: None
+    service.db.flush = AsyncMock()
+    service.db.refresh = AsyncMock()
+
+    collection = await service.create(family_admin_id=uuid4(), director_id=None)
+
+    service.count_by_director.assert_not_awaited()
+    assert collection.director_id is None
+
+
+@pytest.mark.asyncio
+async def test_publish_without_director_skips_director_published_limit():
+    collection = SimpleNamespace(
+        id=uuid4(),
+        family_admin_id=uuid4(),
+        director_id=None,
+        status=GiftCollectionStatus.DRAFT.value,
+    )
+    service = GiftCollectionService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=collection)
+    service.get_published_by_family_admin = AsyncMock(return_value=None)
+    service.count_by_director = AsyncMock(return_value=MAX_PUBLISHED_PER_DIRECTOR)
+    service.db.flush = AsyncMock()
+    service.db.refresh = AsyncMock()
+
+    published = await service.publish(collection.id, collection.family_admin_id)
+
+    service.count_by_director.assert_not_awaited()
+    assert published.status == GiftCollectionStatus.PUBLISHED.value
+
+
+@pytest.mark.asyncio
 async def test_vendor_create_rejects_duplicate_email():
     existing = make_user(UserRole.VENDOR, email="vendor@example.com")
     db = AsyncMock()

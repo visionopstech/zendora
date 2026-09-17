@@ -122,7 +122,7 @@ class User(Base):
         "GiftCollection",
         foreign_keys="GiftCollection.director_id",
         back_populates="director",
-        # Avoid ORM SET NULL on NOT NULL FKs; the DB already ON DELETE CASCADEs.
+        # Defer to the database ON DELETE SET NULL for optional director_id.
         passive_deletes=True,
     )
     

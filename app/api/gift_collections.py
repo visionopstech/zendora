@@ -177,11 +177,6 @@ async def create_gift_collection(
             funeral_home_id = current_user.funeral_home_id
 
         elif current_user.role == UserRole.FAMILY_ADMIN.value:
-            if not current_user.director_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Family admin must be assigned to a director before creating gift collections",
-                )
             family_admin_id = current_user.id
             director_id = current_user.director_id
             funeral_home_id = current_user.funeral_home_id
@@ -198,11 +193,6 @@ async def create_gift_collection(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Family admin not found",
-                )
-            if not family_admin.director_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Family admin must be assigned to a director before creating gift collections",
                 )
             family_admin_id = family_admin.id
             director_id = family_admin.director_id

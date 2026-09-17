@@ -83,12 +83,16 @@ class OrderService:
             raise NotFoundException("Gift collection not found")
 
         financial_service = FinancialService(self.db)
+        if collection.director_id:
+            director_profit_percentage = await financial_service.get_director_profit_percentage(
+                collection.director_id
+            )
+        else:
+            director_profit_percentage = Decimal("0.00")
         commission_data = await financial_service.calculate_order_commission(
             products=products,
             quantities=quantities,
-            director_profit_percentage=await financial_service.get_director_profit_percentage(
-                collection.director_id
-            ),
+            director_profit_percentage=director_profit_percentage,
         )
         
         order = Order(

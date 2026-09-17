@@ -117,9 +117,9 @@ class OrderCommission(Base):
         unique=True,
         index=True,
     )
-    director_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+    director_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     base_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
@@ -136,7 +136,7 @@ class OrderCommission(Base):
     )
 
     order: Mapped["Order"] = relationship("Order", back_populates="commission")
-    director: Mapped["User"] = relationship("User", back_populates="order_commissions")
+    director: Mapped[Optional["User"]] = relationship("User", back_populates="order_commissions")
 
     def __repr__(self) -> str:
         return (

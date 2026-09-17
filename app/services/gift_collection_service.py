@@ -207,7 +207,7 @@ class GiftCollectionService:
     async def create(
         self,
         family_admin_id: UUID,
-        director_id: UUID,
+        director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         source_default_collection_id: Optional[UUID] = None,
         title: Optional[str] = None,
@@ -219,7 +219,8 @@ class GiftCollectionService:
         delivery_address: Optional[dict] = None
     ) -> GiftCollection:
         """Create a new gift collection."""
-        await self._assert_director_collection_limit(director_id)
+        if director_id:
+            await self._assert_director_collection_limit(director_id)
         slug = await self._ensure_unique_slug()
         
         collection = GiftCollection(
@@ -247,7 +248,7 @@ class GiftCollectionService:
     async def create_from_default_collection(
         self,
         family_admin_id: UUID,
-        director_id: UUID,
+        director_id: Optional[UUID],
         default_collection_data: dict,
         overrides: dict,
         override_fields: set[str],
@@ -335,7 +336,8 @@ class GiftCollectionService:
                 "Please unpublish it before publishing another."
             )
 
-        await self._assert_director_published_limit(collection.director_id)
+        if collection.director_id:
+            await self._assert_director_published_limit(collection.director_id)
         
         collection.status = GiftCollectionStatus.PUBLISHED.value
         collection.published_at = datetime.utcnow()
@@ -412,7 +414,7 @@ class GiftCollectionService:
     async def create_with_products(
         self,
         family_admin_id: UUID,
-        director_id: UUID,
+        director_id: Optional[UUID],
         products: List[dict],
         funeral_home_id: Optional[UUID] = None,
         source_default_collection_id: Optional[UUID] = None,
@@ -473,7 +475,7 @@ class GiftCollectionService:
     async def _create_from_payload(
         self,
         family_admin_id: UUID,
-        director_id: UUID,
+        director_id: Optional[UUID],
         payload: dict[str, Any],
         funeral_home_id: Optional[UUID] = None,
         source_default_collection_id: Optional[UUID] = None,

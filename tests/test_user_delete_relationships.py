@@ -17,7 +17,7 @@ def test_user_delete_does_not_null_required_cascade_fks():
     """Deleting a user must not SET NULL on NOT NULL child FKs.
 
     SQLAlchemy's default is to null parent FKs on related rows before DELETE.
-    Those children use ON DELETE CASCADE and required columns (e.g.
+    Those children use ON DELETE CASCADE (or SET NULL for optional
     gift_collections.director_id), so the ORM must defer to the database.
     """
     mapper = inspect(User)

@@ -184,6 +184,49 @@ async def test_order_service_create_order_creates_commission_snapshot_for_collec
 
 
 @pytest.mark.asyncio
+async def test_order_service_create_order_without_director_uses_zero_director_profit(monkeypatch):
+    collection = SimpleNamespace(id=uuid4(), director_id=None, funeral_home_id=None)
+    db = FakeSession(collection=collection)
+    financial_service = SimpleNamespace(
+        get_director_profit_percentage=AsyncMock(),
+        calculate_order_commission=AsyncMock(
+            return_value={
+                "base_amount": Decimal("10.00"),
+                "final_amount": Decimal("20.00"),
+                "raw_benefit_amount": Decimal("10.00"),
+                "director_profit_percentage": Decimal("0.00"),
+                "director_profit_amount": Decimal("0.00"),
+                "platform_profit_amount": Decimal("10.00"),
+            }
+        ),
+        create_order_commission_snapshot=AsyncMock(),
+    )
+
+    monkeypatch.setattr(order_service_module, "FinancialService", lambda _: financial_service)
+
+    service = OrderService(db)
+    product = SimpleNamespace(id=uuid4(), name="Car seat", price=Decimal("20.00"))
+
+    order = await service.create_order(
+        visitor_id=uuid4(),
+        gift_collection_id=collection.id,
+        family_admin_id=uuid4(),
+        stripe_session_id="temp_123",
+        products=[product],
+        quantities={product.id: 1},
+    )
+
+    financial_service.get_director_profit_percentage.assert_not_awaited()
+    financial_service.create_order_commission_snapshot.assert_awaited_once_with(
+        order_id=order.id,
+        director_id=None,
+        products=[product],
+        quantities={product.id: 1},
+    )
+    assert order.funeral_home_id is None
+
+
+@pytest.mark.asyncio
 async def test_financial_service_credit_order_commission_is_idempotent(monkeypatch):
     db = FakeSession()
     service = FinancialService(db)
