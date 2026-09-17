@@ -39,7 +39,8 @@ class UserAdmin(ModelView, model=User):
     column_filters = [User.role, User.is_active, User.created_at]
 
     form_columns = [
-        User.email, User.first_name, User.last_name, User.deceased_name, User.role,
+        User.email, User.first_name, User.last_name, User.deceased_first_name,
+        User.deceased_last_name, User.role,
         User.is_active, User.director, User.funeral_home, User.vendor
     ]
 
@@ -71,7 +72,8 @@ class UserAdmin(ModelView, model=User):
         User.email: "Email",
         User.first_name: "First Name",
         User.last_name: "Last Name",
-        User.deceased_name: "Deceased Name",
+        User.deceased_first_name: "Deceased First Name",
+        User.deceased_last_name: "Deceased Last Name",
         User.role: "Role",
         User.is_active: "Active",
         User.director_id: "Director ID",
@@ -260,7 +262,8 @@ class ProductAdmin(ModelView, model=Product):
     column_default_sort = [(Product.created_at, True)]
 
     column_details_list = [
-        Product.id, Product.name, Product.description, Product.base_price, Product.price,
+        Product.id, Product.name, Product.description, Product.details,
+        Product.base_price, Product.price,
         Product.images, Product.is_active, Product.vendor_associations,
         Product.created_at, Product.updated_at
     ]
@@ -278,6 +281,7 @@ class ProductAdmin(ModelView, model=Product):
         Product.is_active: lambda m, a: format_boolean(m.is_active),
         Product.created_at: lambda m, a: format_datetime(m.created_at),
         Product.images: lambda m, a: f"{len(m.images)} image(s)" if m.images else "No images",
+        Product.details: lambda m, a: "; ".join(m.details) if m.details else "",
         Product.vendor_associations: lambda m, a: f"{len(m.vendor_associations)} vendor(s)" if m.vendor_associations else "No vendors",
     }
 
@@ -299,6 +303,7 @@ class ProductAdmin(ModelView, model=Product):
         Product.id: "ID",
         Product.name: "Name",
         Product.description: "Description",
+        Product.details: "Details",
         Product.base_price: "Base Price",
         Product.price: "Retail Price",
         Product.images: "Gallery",

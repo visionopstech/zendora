@@ -18,6 +18,7 @@ os.environ.setdefault("SENDGRID_FROM_EMAIL", "test@example.com")
 from app.models.finance import Wallet, WalletType
 from app.models.gift_collection import GiftCollection
 from app.models.order import Order, OrderProduct
+from app.schemas.gift_collection import GiftInCollection
 from app.schemas.product import ProductCreate
 from app.services.financial_service import FinancialService
 from app.services.order_service import OrderService
@@ -55,6 +56,41 @@ def test_product_schema_rejects_price_below_base_price():
             images=[],
             vendor_ids=[],
         )
+
+
+def test_product_schema_strips_details_and_rejects_blank_items():
+    product = ProductCreate(
+        name="Stroller",
+        base_price=Decimal("10.00"),
+        price=Decimal("12.00"),
+        details=["  Foldable  ", "Includes rain cover"],
+    )
+    assert product.details == ["Foldable", "Includes rain cover"]
+
+    with pytest.raises(PydanticValidationError):
+        ProductCreate(
+            name="Stroller",
+            base_price=Decimal("10.00"),
+            price=Decimal("12.00"),
+            details=["Foldable", "   "],
+        )
+
+
+def test_gift_in_collection_includes_product_details():
+    product = SimpleNamespace(
+        id=uuid4(),
+        name="Stroller",
+        description="A compact stroller",
+        details=["Foldable", "Includes rain cover"],
+        price=Decimal("12.00"),
+        images=[],
+        primary_image_url=None,
+    )
+    gift = GiftInCollection.from_collection_product(
+        SimpleNamespace(product=product, quantity=2)
+    )
+    assert gift.details == ["Foldable", "Includes rain cover"]
+    assert gift.quantity == 2
 
 
 @pytest.mark.asyncio

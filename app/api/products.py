@@ -84,6 +84,7 @@ async def create_product(
                 name=product_data.name,
                 base_price=product_data.base_price,
                 description=product_data.description,
+                details=product_data.details,
                 price=product_data.price,
                 images=_images_payload(product_data.images),
                 vendor_ids=vendor_ids
@@ -96,6 +97,7 @@ async def create_product(
                     name=product_data.name,
                     base_price=product_data.base_price,
                     description=product_data.description,
+                    details=product_data.details,
                     price=product_data.price,
                     images=_images_payload(product_data.images),
                     vendor_ids=vendor_ids
@@ -105,6 +107,7 @@ async def create_product(
                     name=product_data.name,
                     base_price=product_data.base_price,
                     description=product_data.description,
+                    details=product_data.details,
                     price=product_data.price,
                     images=_images_payload(product_data.images)
                 )
@@ -219,6 +222,7 @@ async def update_product(
             product_id=product_id,
             name=product_data.name,
             description=product_data.description,
+            details=product_data.details,
             base_price=product_data.base_price,
             price=product_data.price,
             images=_images_payload(product_data.images),

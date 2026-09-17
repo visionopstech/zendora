@@ -129,6 +129,7 @@ async def create_product(
         product = await product_service.create(
             name=product_data.name,
             description=product_data.description,
+            details=product_data.details,
             base_price=product_data.base_price,
             price=product_data.price,
             images=[image.model_dump() for image in product_data.images] if product_data.images else None
@@ -196,6 +197,7 @@ async def update_product(
             product_id=product_id,
             name=product_data.name,
             description=product_data.description,
+            details=product_data.details,
             base_price=product_data.base_price,
             price=product_data.price,
             images=[image.model_dump() for image in product_data.images] if product_data.images is not None else None,

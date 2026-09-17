@@ -40,7 +40,8 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Family-admin profile (unused for other roles)
-    deceased_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    deceased_first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    deceased_last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     address: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
     # Role and status

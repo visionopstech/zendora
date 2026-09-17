@@ -26,7 +26,8 @@ def _build_response(family: User, stats: dict) -> FamilyResponse:
         email=family.email,
         first_name=family.first_name,
         last_name=family.last_name,
-        deceased_name=family.deceased_name,
+        deceased_first_name=family.deceased_first_name,
+        deceased_last_name=family.deceased_last_name,
         address=address,
         is_active=family.is_active,
         created_at=family.created_at,
@@ -66,7 +67,8 @@ async def create_family(
         last_name=family_data.last_name,
         director_id=current_user.id,
         funeral_home_id=current_user.funeral_home_id,
-        deceased_name=family_data.deceased_name,
+        deceased_first_name=family_data.deceased_first_name,
+        deceased_last_name=family_data.deceased_last_name,
         address=family_data.address.model_dump(),
     )
     await db.commit()

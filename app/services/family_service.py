@@ -55,7 +55,8 @@ class FamilyService:
                     User.email.ilike(pattern),
                     User.first_name.ilike(pattern),
                     User.last_name.ilike(pattern),
-                    User.deceased_name.ilike(pattern),
+                    User.deceased_first_name.ilike(pattern),
+                    User.deceased_last_name.ilike(pattern),
                 )
             )
 

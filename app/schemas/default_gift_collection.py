@@ -65,6 +65,7 @@ class DefaultCollectionProductResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str]
+    details: List[str] = Field(default_factory=list)
     price: float
     images: List[ProductImageResponse] = Field(default_factory=list)
     primary_image_url: Optional[str] = None
@@ -79,6 +80,7 @@ class DefaultCollectionProductResponse(BaseModel):
             id=product.id,
             name=product.name,
             description=product.description,
+            details=list(product.details or []),
             price=float(product.price),
             images=[ProductImageResponse.model_validate(image) for image in product.images],
             primary_image_url=product.primary_image_url,

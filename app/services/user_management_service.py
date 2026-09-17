@@ -159,15 +159,14 @@ class UserManagementService:
         director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
+        deceased_first_name: Optional[str] = None,
+        deceased_last_name: Optional[str] = None,
         profit_percentage: Optional[Decimal] = None
     ) -> User:
         """Create a new user."""
         existing_user = await self.get_by_email(email)
         if existing_user:
             raise ConflictError("User with this email already exists")
-        
-        if role == UserRole.FAMILY_ADMIN and not director_id:
-            raise PermissionDenied("FAMILY_ADMIN users must have a director_id")
         
         if role == UserRole.VENDOR and not vendor_id:
             raise PermissionDenied("VENDOR users must have a vendor_id")
@@ -206,6 +205,8 @@ class UserManagementService:
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             vendor_id=vendor_id,
+            deceased_first_name=deceased_first_name,
+            deceased_last_name=deceased_last_name,
             is_active=True
         )
         
@@ -231,9 +232,12 @@ class UserManagementService:
         director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
+        deceased_first_name: Optional[str] = None,
+        deceased_last_name: Optional[str] = None,
         password: Optional[str] = None,
         profit_percentage: Optional[Decimal] = None,
         profit_percentage_provided: bool = False,
+        director_id_provided: bool = False,
     ) -> User:
         """Update user details."""
         user = await self.get_by_id(user_id)
@@ -251,6 +255,10 @@ class UserManagementService:
             user.first_name = first_name
         if last_name is not None:
             user.last_name = last_name
+        if deceased_first_name is not None:
+            user.deceased_first_name = deceased_first_name
+        if deceased_last_name is not None:
+            user.deceased_last_name = deceased_last_name
         
         resulting_role = user.role
         if role is not None:
@@ -258,23 +266,24 @@ class UserManagementService:
             user.role = role_value
             resulting_role = role_value
             
-            if role == UserRole.FAMILY_ADMIN and not (user.director_id or director_id):
-                raise PermissionDenied("FAMILY_ADMIN users must have a director_id")
             if role == UserRole.VENDOR and not (user.vendor_id or vendor_id):
                 raise PermissionDenied("VENDOR users must have a vendor_id")
         
         if is_active is not None:
             user.is_active = is_active
         
-        if director_id is not None:
-            director = await self.get_by_id(director_id)
-            if not director:
-                raise NotFoundException("Director not found")
-            if director.role != UserRole.DIRECTOR.value:
-                raise PermissionDenied("Specified director_id must belong to a DIRECTOR user")
-            user.director_id = director_id
-            if funeral_home_id is None and user.role == UserRole.FAMILY_ADMIN.value:
-                user.funeral_home_id = director.funeral_home_id
+        if director_id_provided:
+            if director_id is not None:
+                director = await self.get_by_id(director_id)
+                if not director:
+                    raise NotFoundException("Director not found")
+                if director.role != UserRole.DIRECTOR.value:
+                    raise PermissionDenied("Specified director_id must belong to a DIRECTOR user")
+                user.director_id = director_id
+                if funeral_home_id is None and user.role == UserRole.FAMILY_ADMIN.value:
+                    user.funeral_home_id = director.funeral_home_id
+            else:
+                user.director_id = None
         
         if funeral_home_id is not None:
             await self._verify_funeral_home(funeral_home_id)

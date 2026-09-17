@@ -47,7 +47,8 @@ class UserService:
         director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         vendor_id: Optional[UUID] = None,
-        deceased_name: Optional[str] = None,
+        deceased_first_name: Optional[str] = None,
+        deceased_last_name: Optional[str] = None,
         address: Optional[dict] = None,
     ) -> User:
         """Create a new user."""
@@ -62,7 +63,8 @@ class UserService:
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             vendor_id=vendor_id,
-            deceased_name=deceased_name,
+            deceased_first_name=deceased_first_name,
+            deceased_last_name=deceased_last_name,
             address=address,
             is_active=True
         )
@@ -112,7 +114,8 @@ class UserService:
         last_name: str,
         director_id: UUID,
         funeral_home_id: Optional[UUID] = None,
-        deceased_name: Optional[str] = None,
+        deceased_first_name: Optional[str] = None,
+        deceased_last_name: Optional[str] = None,
         address: Optional[dict] = None,
     ) -> tuple[User, str]:
         """
@@ -129,7 +132,8 @@ class UserService:
             last_name=last_name,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
-            deceased_name=deceased_name,
+            deceased_first_name=deceased_first_name,
+            deceased_last_name=deceased_last_name,
             address=address,
         )
         

@@ -13,7 +13,8 @@ class FamilyCreate(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=255)
     last_name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    deceased_name: str = Field(..., min_length=1, max_length=255)
+    deceased_first_name: str = Field(..., min_length=1, max_length=255)
+    deceased_last_name: str = Field(..., min_length=1, max_length=255)
     address: DeliveryAddress
 
 
@@ -24,7 +25,8 @@ class FamilyResponse(BaseModel):
     email: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    deceased_name: Optional[str] = None
+    deceased_first_name: Optional[str] = None
+    deceased_last_name: Optional[str] = None
     address: Optional[DeliveryAddress] = None
     is_active: bool
     created_at: datetime

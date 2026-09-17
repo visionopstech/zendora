@@ -31,6 +31,7 @@ from app.services.gift_collection_service import (
     MAX_PUBLISHED_PER_DIRECTOR,
     GiftCollectionService,
 )
+from app.services.user_management_service import UserManagementService
 from app.services.vendor_service import VendorService
 
 
@@ -64,7 +65,8 @@ def make_user(role: UserRole, **kwargs):
         directed_funeral_home=kwargs.get("directed_funeral_home"),
         is_active=kwargs.get("is_active", True),
         created_at=kwargs.get("created_at", datetime.utcnow()),
-        deceased_name=kwargs.get("deceased_name"),
+        deceased_first_name=kwargs.get("deceased_first_name"),
+        deceased_last_name=kwargs.get("deceased_last_name"),
         address=kwargs.get("address"),
         director=kwargs.get("director"),
     )
@@ -206,7 +208,8 @@ async def test_family_create_endpoint(monkeypatch):
         email="family@example.com",
         director_id=current_user.id,
         funeral_home_id=home_id,
-        deceased_name="Sam Rivera",
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
         address={
             "street": "1 Main",
             "city": "Austin",
@@ -244,7 +247,8 @@ async def test_family_create_endpoint(monkeypatch):
             first_name="Alex",
             last_name="Rivera",
             email="family@example.com",
-            deceased_name="Sam Rivera",
+            deceased_first_name="Sam",
+            deceased_last_name="Rivera",
             address=DeliveryAddress(
                 street="1 Main",
                 city="Austin",
@@ -259,8 +263,55 @@ async def test_family_create_endpoint(monkeypatch):
 
     assert response.email == "family@example.com"
     assert response.first_name == "Alex"
-    assert response.deceased_name == "Sam Rivera"
+    assert response.deceased_first_name == "Sam"
+    assert response.deceased_last_name == "Rivera"
     user_service.create_family_admin_with_director.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_family_admin_can_be_created_without_director():
+    created = make_user(UserRole.FAMILY_ADMIN, director_id=None)
+    service = UserManagementService(AsyncMock())
+    service.get_by_email = AsyncMock(return_value=None)
+    service.get_by_id = AsyncMock(return_value=created)
+    service.db.add = lambda _user: None
+    service.db.flush = AsyncMock()
+
+    user = await service.create(
+        email="family@example.com",
+        password="password123",
+        role=UserRole.FAMILY_ADMIN,
+        first_name="Alex",
+        last_name="Rivera",
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
+    )
+
+    assert user.director_id is None
+    assert user.role == UserRole.FAMILY_ADMIN.value
+
+
+@pytest.mark.asyncio
+async def test_family_admin_update_can_clear_director_id(monkeypatch):
+    family = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
+    service = UserManagementService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=family)
+    service.db.flush = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.user_management_service.FinancialService",
+        lambda _db: SimpleNamespace(
+            get_director_commission=AsyncMock(return_value=None),
+            upsert_director_commission=AsyncMock(),
+        ),
+    )
+
+    user = await service.update(
+        user_id=family.id,
+        director_id=None,
+        director_id_provided=True,
+    )
+
+    assert user.director_id is None
 
 
 @pytest.mark.asyncio

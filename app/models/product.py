@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     CheckConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -36,6 +37,9 @@ class Product(Base):
     # Product information
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details: Mapped[List[str]] = mapped_column(
+        ARRAY(Text), nullable=False, default=list, server_default="{}"
+    )
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

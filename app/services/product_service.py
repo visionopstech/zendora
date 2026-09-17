@@ -117,6 +117,7 @@ class ProductService:
         base_price: Decimal,
         price: Decimal,
         description: Optional[str] = None,
+        details: Optional[List[str]] = None,
         images: Optional[List[dict]] = None
     ) -> Product:
         """Create a new gift with its gallery."""
@@ -124,6 +125,7 @@ class ProductService:
         product = Product(
             name=name,
             description=description,
+            details=details or [],
             base_price=base_price,
             price=price,
             is_active=True
@@ -146,6 +148,7 @@ class ProductService:
         price: Decimal,
         vendor_ids: List[UUID],
         description: Optional[str] = None,
+        details: Optional[List[str]] = None,
         images: Optional[List[dict]] = None
     ) -> Product:
         """Create a new gift and associate it with vendors in one operation."""
@@ -154,6 +157,7 @@ class ProductService:
             base_price=base_price,
             price=price,
             description=description,
+            details=details,
             images=images
         )
         
@@ -179,6 +183,7 @@ class ProductService:
         product_id: UUID,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        details: Optional[List[str]] = None,
         base_price: Optional[Decimal] = None,
         price: Optional[Decimal] = None,
         images: Optional[List[dict]] = None,
@@ -198,6 +203,8 @@ class ProductService:
             product.name = name
         if description is not None:
             product.description = description
+        if details is not None:
+            product.details = details
         if base_price is not None:
             product.base_price = base_price
         if price is not None:

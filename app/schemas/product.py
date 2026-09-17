@@ -1,5 +1,5 @@
 from uuid import UUID
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -37,8 +37,22 @@ class ProductBase(BaseModel):
     """Base gift schema."""
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    details: List[str] = Field(
+        default_factory=list,
+        description="Bullet-point details shown on the gift",
+    )
     base_price: Decimal = Field(..., ge=0)
     price: Decimal = Field(..., gt=0)
+
+    @field_validator("details")
+    @classmethod
+    def validate_details(cls, value: List[str]) -> List[str]:
+        cleaned = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError("details items must be non-empty strings")
+            cleaned.append(item.strip())
+        return cleaned
 
     @model_validator(mode="after")
     def validate_prices(self):
@@ -60,6 +74,10 @@ class ProductUpdate(BaseModel):
     """Schema for updating a gift."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
+    details: Optional[List[str]] = Field(
+        None,
+        description="When provided, replaces the bullet-point details",
+    )
     base_price: Optional[Decimal] = Field(None, ge=0)
     price: Optional[Decimal] = Field(None, gt=0)
     images: Optional[List[ProductImageInput]] = Field(
@@ -68,6 +86,18 @@ class ProductUpdate(BaseModel):
     )
     is_active: Optional[bool] = None
     vendor_ids: Optional[List[UUID]] = Field(None, description="Optional list of vendor IDs to associate with the product")
+
+    @field_validator("details")
+    @classmethod
+    def validate_details(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        cleaned = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError("details items must be non-empty strings")
+            cleaned.append(item.strip())
+        return cleaned
 
     @model_validator(mode="after")
     def validate_prices(self):
