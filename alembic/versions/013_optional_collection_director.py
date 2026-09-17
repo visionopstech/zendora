@@ -1,7 +1,7 @@
 """Allow gift collections (and order commissions) without a director
 
 Revision ID: 013_optional_collection_director
-Revises: 012_deceased_names_product_details
+Revises: 012_deceased_product_details
 Create Date: 2026-09-17 17:16:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "013_optional_collection_director"
-down_revision: Union[str, None] = "012_deceased_names_product_details"
+down_revision: Union[str, None] = "012_deceased_product_details"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,6 +1,6 @@
 """Split deceased_name and add products.details
 
-Revision ID: 012_deceased_names_product_details
+Revision ID: 012_deceased_product_details
 Revises: 011_names_family_vendor
 Create Date: 2026-09-17 16:52:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "012_deceased_names_product_details"
+revision: str = "012_deceased_product_details"
 down_revision: Union[str, None] = "011_names_family_vendor"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
