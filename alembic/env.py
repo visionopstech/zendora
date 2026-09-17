@@ -29,6 +29,7 @@ from app.models import (  # noqa: F401
     OrderCommission,
     DirectorSettings,
     GiftCollectionSettings,
+    EmailTemplate,
 )
 
 # this is the Alembic Config object

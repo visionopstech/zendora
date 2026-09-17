@@ -24,6 +24,7 @@ from app.models.finance import (
 )
 from app.models.director_settings import DirectorSettings
 from app.models.gift_collection_settings import GiftCollectionSettings
+from app.models.email_template import EmailTemplate, EmailTemplateSlug
 
 __all__ = [
     "User",
@@ -50,4 +51,6 @@ __all__ = [
     "OrderCommission",
     "DirectorSettings",
     "GiftCollectionSettings",
+    "EmailTemplate",
+    "EmailTemplateSlug",
 ]

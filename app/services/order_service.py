@@ -9,6 +9,7 @@ from datetime import datetime
 from app.models.order import Order, OrderProduct, OrderStatus
 from app.models.product import Product, ProductVendor
 from app.models.gift_collection import GiftCollection
+from app.models.vendor import Vendor
 from app.core.exceptions import NotFoundException
 from app.services.financial_service import FinancialService
 
@@ -24,10 +25,17 @@ class OrderService:
             selectinload(Order.visitor),
             selectinload(Order.family_admin),
             selectinload(Order.funeral_home),
-            selectinload(Order.gift_collection),
+            selectinload(Order.gift_collection).selectinload(GiftCollection.director),
+            selectinload(Order.gift_collection).selectinload(GiftCollection.funeral_home),
         ]
         if load_products:
-            options.append(selectinload(Order.products))
+            options.append(
+                selectinload(Order.products)
+                .selectinload(OrderProduct.product)
+                .selectinload(Product.vendor_associations)
+                .selectinload(ProductVendor.vendor)
+                .selectinload(Vendor.vendor_users)
+            )
         return options
     
     async def get_by_id(

@@ -25,9 +25,12 @@ class Settings(BaseSettings):
     stripe_publishable_key: str
     stripe_webhook_secret: str
     
-    # SendGrid
-    sendgrid_api_key: str
-    sendgrid_from_email: str
+    # Amazon SES
+    aws_region: str = "us-east-1"
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    ses_from_email: str
+    ses_from_name: Optional[str] = "Zendora"
     
     # Third-Party Auth
     third_party_auth_url: Optional[str] = None

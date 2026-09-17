@@ -266,15 +266,23 @@ async def create_gift_collection(
 
         await db.commit()
 
-        if new_family_admin:
-            from app.services.email_service import EmailService
+        from app.services.email_service import (
+            EmailService,
+            send_collection_created_notifications,
+        )
 
+        if new_family_admin:
             email_service = EmailService()
             background_tasks.add_task(
                 email_service.send_family_admin_credentials_email,
                 new_family_admin[0],
                 new_family_admin[1],
             )
+
+        background_tasks.add_task(
+            send_collection_created_notifications,
+            collection.id,
+        )
 
         collection = await collection_service.get_by_id(collection.id, load_products=True)
         return _build_response(collection)

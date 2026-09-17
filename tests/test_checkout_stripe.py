@@ -11,8 +11,8 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_mock")
 os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "pk_test_mock")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_mock")
-os.environ.setdefault("SENDGRID_API_KEY", "test")
-os.environ.setdefault("SENDGRID_FROM_EMAIL", "test@example.com")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
 from app.api.webhooks import (
     handle_expired_payment,
@@ -166,7 +166,7 @@ async def test_handle_successful_payment_marks_paid_and_credits_commission():
     financial_service.credit_order_commission = AsyncMock(return_value=True)
 
     email_service = AsyncMock()
-    email_service.send_purchase_confirmation_emails = AsyncMock()
+    email_service.notify_order_created = AsyncMock()
 
     with patch("app.api.webhooks.AsyncSessionLocal") as session_local:
         session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
@@ -183,7 +183,7 @@ async def test_handle_successful_payment_marks_paid_and_credits_commission():
 
     order_service.mark_as_paid.assert_awaited_once_with(order_id)
     financial_service.credit_order_commission.assert_awaited_once_with(order_id)
-    email_service.send_purchase_confirmation_emails.assert_awaited_once()
+    email_service.notify_order_created.assert_awaited_once()
 
 
 @pytest.mark.asyncio

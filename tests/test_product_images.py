@@ -10,8 +10,8 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("STRIPE_SECRET_KEY", "test")
 os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "test")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "test")
-os.environ.setdefault("SENDGRID_API_KEY", "test")
-os.environ.setdefault("SENDGRID_FROM_EMAIL", "test@example.com")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
 from app.core.exceptions import ValidationError
 from app.models.product import Product, ProductImage

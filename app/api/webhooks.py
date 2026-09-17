@@ -156,15 +156,17 @@ async def handle_successful_payment(session: dict):
                 logger.info("Order %s already processed", order_id)
                 return
 
-            await db.refresh(order, ["visitor", "admin", "wishlist", "products"])
-            await db.refresh(order.wishlist, ["manager"])
+            order = await order_service.get_by_id(order_id, load_products=True)
+            if not order:
+                logger.error("Could not reload order %s after payment", order_id)
+                return
 
             logger.info("Order %s marked as paid", order_id)
 
             from app.services.email_service import EmailService
 
-            email_service = EmailService()
-            await email_service.send_purchase_confirmation_emails(order)
+            email_service = EmailService(db)
+            await email_service.notify_order_created(order)
 
         except Exception:
             logger.exception("Error handling successful payment")

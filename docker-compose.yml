@@ -42,8 +42,11 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_placeholder}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-SG.placeholder}
-      SENDGRID_FROM_EMAIL: noreply@zendora.com
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-noreply@zendora.com}
+      SES_FROM_NAME: Zendora
       THIRD_PARTY_AUTH_URL: ${THIRD_PARTY_AUTH_URL:-https://partner.com/verify}
       THIRD_PARTY_AUTH_TOKEN: ${THIRD_PARTY_AUTH_TOKEN:-}
       FRONTEND_URL: http://localhost:3000
@@ -67,8 +70,11 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_placeholder}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-SG.placeholder}
-      SENDGRID_FROM_EMAIL: noreply@zendora.com
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-noreply@zendora.com}
+      SES_FROM_NAME: Zendora
       THIRD_PARTY_AUTH_URL: ${THIRD_PARTY_AUTH_URL:-https://partner.com/verify}
       THIRD_PARTY_AUTH_TOKEN: ${THIRD_PARTY_AUTH_TOKEN:-}
       FRONTEND_URL: http://localhost:3000
@@ -92,8 +98,11 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_placeholder}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-SG.placeholder}
-      SENDGRID_FROM_EMAIL: noreply@zendora.com
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-noreply@zendora.com}
+      SES_FROM_NAME: Zendora
       THIRD_PARTY_AUTH_URL: ${THIRD_PARTY_AUTH_URL:-https://partner.com/verify}
       THIRD_PARTY_AUTH_TOKEN: ${THIRD_PARTY_AUTH_TOKEN:-}
       FRONTEND_URL: http://localhost:3000
