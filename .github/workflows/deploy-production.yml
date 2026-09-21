@@ -1,0 +1,48 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_SERVER_IP }}
+          username: ${{ secrets.PROD_SERVER_GITHUB_USERNAME }}
+          key: ${{ secrets.PROD_SERVER_GITHUB_SSHKEY }}
+          port: 22
+          script: |
+            set -e
+
+            # Update this path to the location of this repo on the production server.
+            DEPLOY_PATH="/srv/sites/zendora"
+
+            cd "$DEPLOY_PATH"
+
+            docker compose down
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            docker compose up --build -d --force-recreate
+
+            echo "Waiting for services to start..."
+            sleep 10
+
+            docker compose ps
+
+            echo "Running database migrations..."
+            docker exec zendora-api-1 alembic upgrade head
+
+            echo "Checking API health..."
+            docker exec zendora-api-1 python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
