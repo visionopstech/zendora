@@ -5,15 +5,40 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.exceptions import ConflictError, NotFoundException
 from app.dependencies.auth import get_current_user, require_director_with_funeral_home
 from app.models.user import User, UserRole
 from app.schemas.common import DeliveryAddress, FuneralHomeRef, PaginatedResponse, PaginationParams, UserRef
-from app.schemas.family import FamilyCreate, FamilyResponse
+from app.schemas.family import FamilyCreate, FamilyResponse, FamilyUpdate
 from app.services.director_scope import director_can_read_family, director_data_scope
 from app.services.family_service import FamilyService
 from app.services.user_service import UserService
 
 router = APIRouter()
+
+
+def _assert_can_access_family(current_user: User, family: User, *, action: str) -> None:
+    """Raise 403 unless the caller may view or update this family."""
+    if current_user.role == UserRole.SUPER_ADMIN.value:
+        return
+    if current_user.role == UserRole.DIRECTOR.value:
+        if not director_can_read_family(current_user, family):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You can only {action} families assigned to you",
+            )
+        return
+    if current_user.role == UserRole.FAMILY_ADMIN.value:
+        if family.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You can only {action} your own family",
+            )
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"You do not have permission to {action} families",
+    )
 
 
 def _build_response(family: User, stats: dict) -> FamilyResponse:
@@ -167,25 +192,62 @@ async def get_family(
             detail="Family not found",
         )
 
-    if current_user.role == UserRole.SUPER_ADMIN.value:
-        pass
-    elif current_user.role == UserRole.DIRECTOR.value:
-        if not director_can_read_family(current_user, family):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view families assigned to you",
-            )
-    elif current_user.role == UserRole.FAMILY_ADMIN.value:
-        if family.id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view your own family",
-            )
-    else:
+    _assert_can_access_family(current_user, family, action="view")
+
+    stats = await service.get_collection_stats([family.id])
+    return _build_response(family, stats.get(family.id, {}))
+
+
+@router.patch("/{family_admin_id}", response_model=FamilyResponse)
+async def update_family(
+    family_admin_id: UUID,
+    family_data: FamilyUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Partially update a family.
+
+    - SUPER_ADMIN: any family
+    - Main director: families in their funeral home
+    - Other director: only families they oversee
+    - FAMILY_ADMIN: only themselves (cannot change is_active)
+    """
+    service = FamilyService(db)
+    family = await service.get_by_id(family_admin_id)
+
+    if not family:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to view families",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Family not found",
         )
 
+    _assert_can_access_family(current_user, family, action="update")
+
+    is_active = family_data.is_active
+    if is_active is not None and current_user.role == UserRole.FAMILY_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Family admins cannot change their active status",
+        )
+
+    try:
+        family = await service.update(
+            family_admin_id=family_admin_id,
+            first_name=family_data.first_name,
+            last_name=family_data.last_name,
+            email=family_data.email,
+            deceased_first_name=family_data.deceased_first_name,
+            deceased_last_name=family_data.deceased_last_name,
+            address=family_data.address.model_dump() if family_data.address else None,
+            is_active=is_active,
+        )
+        await db.commit()
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+    family = await service.get_by_id(family.id)
     stats = await service.get_collection_stats([family.id])
     return _build_response(family, stats.get(family.id, {}))

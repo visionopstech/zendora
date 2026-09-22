@@ -5,12 +5,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.exceptions import ConflictError, NotFoundException
 from app.models.gift_collection import GiftCollection, GiftCollectionStatus
 from app.models.user import User, UserRole
 
 
 class FamilyService:
-    """Read model for family admins enriched with funeral home and collection data."""
+    """Family admins enriched with funeral home and collection data."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -77,6 +78,46 @@ class FamilyService:
 
         result = await self.db.execute(query)
         return list(result.scalars().all()), total
+
+    async def update(
+        self,
+        family_admin_id: UUID,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        email: Optional[str] = None,
+        deceased_first_name: Optional[str] = None,
+        deceased_last_name: Optional[str] = None,
+        address: Optional[dict] = None,
+        is_active: Optional[bool] = None,
+    ) -> User:
+        """Partially update a family admin profile."""
+        family = await self.get_by_id(family_admin_id)
+        if not family:
+            raise NotFoundException("Family not found")
+
+        if email is not None and email != family.email:
+            existing = await self.db.execute(
+                select(User).where(User.email == email, User.id != family_admin_id)
+            )
+            if existing.scalar_one_or_none():
+                raise ConflictError("User with this email already exists")
+            family.email = email
+
+        if first_name is not None:
+            family.first_name = first_name
+        if last_name is not None:
+            family.last_name = last_name
+        if deceased_first_name is not None:
+            family.deceased_first_name = deceased_first_name
+        if deceased_last_name is not None:
+            family.deceased_last_name = deceased_last_name
+        if address is not None:
+            family.address = address
+        if is_active is not None:
+            family.is_active = is_active
+
+        await self.db.flush()
+        return await self.get_by_id(family.id)
 
     async def get_collection_stats(
         self,

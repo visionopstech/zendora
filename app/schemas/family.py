@@ -18,6 +18,18 @@ class FamilyCreate(BaseModel):
     address: DeliveryAddress
 
 
+class FamilyUpdate(BaseModel):
+    """Schema for a partial family admin update."""
+
+    first_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    deceased_first_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    deceased_last_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    address: Optional[DeliveryAddress] = None
+    is_active: Optional[bool] = None
+
+
 class FamilyResponse(BaseModel):
     """A family admin enriched with funeral home and collection context."""
 

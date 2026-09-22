@@ -22,7 +22,7 @@ from app.core.exceptions import ConflictError, PermissionDenied
 from app.models.gift_collection import GiftCollectionStatus
 from app.models.user import UserRole
 from app.schemas.common import DeliveryAddress
-from app.schemas.family import FamilyCreate
+from app.schemas.family import FamilyCreate, FamilyUpdate
 from app.schemas.user import DirectorStatusUpdate
 from app.services.director_scope import director_can_read_family, director_data_scope, is_main_director
 from app.services.director_status_service import DirectorStatusService
@@ -302,6 +302,134 @@ async def test_family_create_endpoint(monkeypatch):
     assert response.deceased_first_name == "Sam"
     assert response.deceased_last_name == "Rivera"
     user_service.create_family_admin_with_director.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_family_update_endpoint(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    home_id = uuid4()
+    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    family = make_user(
+        UserRole.FAMILY_ADMIN,
+        first_name="Alex",
+        last_name="Rivera",
+        email="family@example.com",
+        director_id=current_user.id,
+        funeral_home_id=home_id,
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
+        address={
+            "street": "1 Main",
+            "city": "Austin",
+            "state": "TX",
+            "zip_code": "78701",
+            "country": "USA",
+        },
+        funeral_home=make_home(id=home_id, director_id=current_user.id),
+        director=current_user,
+    )
+    updated = make_user(
+        UserRole.FAMILY_ADMIN,
+        id=family.id,
+        first_name="Alex",
+        last_name="Rivera",
+        email="family@example.com",
+        director_id=current_user.id,
+        funeral_home_id=home_id,
+        deceased_first_name="Jordan",
+        deceased_last_name="Lee",
+        address={
+            "street": "9 Oak",
+            "city": "Dallas",
+            "state": "TX",
+            "zip_code": "75201",
+            "country": "USA",
+        },
+        funeral_home=family.funeral_home,
+        director=current_user,
+    )
+    family_service = SimpleNamespace(
+        get_by_id=AsyncMock(side_effect=[family, updated]),
+        update=AsyncMock(return_value=updated),
+        get_collection_stats=AsyncMock(return_value={family.id: {"count": 1}}),
+    )
+    monkeypatch.setattr(families_api, "FamilyService", lambda _: family_service)
+
+    response = await families_api.update_family(
+        family_admin_id=family.id,
+        family_data=FamilyUpdate(
+            deceased_first_name="Jordan",
+            deceased_last_name="Lee",
+            address=DeliveryAddress(
+                street="9 Oak",
+                city="Dallas",
+                state="TX",
+                zip_code="75201",
+            ),
+        ),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.deceased_first_name == "Jordan"
+    assert response.deceased_last_name == "Lee"
+    assert response.address.street == "9 Oak"
+    family_service.update.assert_awaited_once()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_family_update_rejects_unassigned_director(monkeypatch):
+    home_id = uuid4()
+    current_user = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=uuid4()),
+    )
+    family = make_user(
+        UserRole.FAMILY_ADMIN,
+        director_id=uuid4(),
+        funeral_home_id=home_id,
+    )
+    family_service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=family),
+        update=AsyncMock(),
+    )
+    monkeypatch.setattr(families_api, "FamilyService", lambda _: family_service)
+    db = SimpleNamespace(commit=AsyncMock())
+
+    with pytest.raises(HTTPException) as exc:
+        await families_api.update_family(
+            family_admin_id=family.id,
+            family_data=FamilyUpdate(first_name="Alex"),
+            db=db,
+            current_user=current_user,
+        )
+
+    assert exc.value.status_code == 403
+    family_service.update.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_family_admin_cannot_change_active_status(monkeypatch):
+    family = make_user(UserRole.FAMILY_ADMIN)
+    family_service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=family),
+        update=AsyncMock(),
+    )
+    monkeypatch.setattr(families_api, "FamilyService", lambda _: family_service)
+
+    with pytest.raises(HTTPException) as exc:
+        await families_api.update_family(
+            family_admin_id=family.id,
+            family_data=FamilyUpdate(is_active=False),
+            db=SimpleNamespace(commit=AsyncMock()),
+            current_user=family,
+        )
+
+    assert exc.value.status_code == 403
+    family_service.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
