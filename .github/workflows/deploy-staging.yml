@@ -33,6 +33,10 @@ jobs:
             dump_status() {
               echo "===== docker compose ps ====="
               docker compose ps -a || true
+              echo "===== redis logs ====="
+              docker compose logs --tail=100 redis || true
+              echo "===== db logs ====="
+              docker compose logs --tail=50 db || true
               echo "===== api logs ====="
               docker compose logs --tail=100 api || true
             }
@@ -40,6 +44,7 @@ jobs:
 
             echo "Stopping services..."
             docker compose down
+            docker volume rm zendora_redis_data 2>/dev/null || true
 
             echo "Updating code..."
             git fetch origin develop
