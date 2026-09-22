@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     third_party_auth_token: Optional[str] = None
     
     # Frontend
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "https://zendora.gift"
     
     # Redis & Celery
     redis_url: str = "redis://localhost:6379/0"
