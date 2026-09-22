@@ -15,34 +15,58 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_SERVER_IP }}
           username: ${{ secrets.PROD_SERVER_GITHUB_USERNAME }}
           key: ${{ secrets.PROD_SERVER_GITHUB_SSHKEY }}
           port: 22
+          debug: true
+          command_timeout: 20m
           script: |
-            set -e
+            set -euo pipefail
 
-            # Update this path to the location of this repo on the production server.
             DEPLOY_PATH="/srv/sites/zendora"
-
+            echo "Deploying in $DEPLOY_PATH"
             cd "$DEPLOY_PATH"
 
+            dump_status() {
+              echo "===== docker compose ps ====="
+              docker compose ps -a || true
+              echo "===== api logs ====="
+              docker compose logs --tail=100 api || true
+            }
+            trap dump_status ERR
+
+            echo "Stopping services..."
             docker compose down
 
+            echo "Updating code..."
             git fetch origin main
             git reset --hard origin/main
+            git log -1 --oneline
 
+            echo "Starting services..."
             docker compose up --build -d --force-recreate
 
-            echo "Waiting for services to start..."
-            sleep 10
+            echo "Waiting for API health..."
+            healthy=0
+            for i in $(seq 1 30); do
+              if docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()" >/dev/null 2>&1; then
+                echo "API is healthy"
+                healthy=1
+                break
+              fi
+              echo "Waiting ($i/30)..."
+              sleep 2
+            done
+            if [ "$healthy" -ne 1 ]; then
+              echo "API did not become healthy"
+              exit 1
+            fi
 
-            docker compose ps
+            echo "Running migrations..."
+            docker compose exec -T api alembic upgrade head
 
-            echo "Running database migrations..."
-            docker exec zendora-api-1 alembic upgrade head
-
-            echo "Checking API health..."
-            docker exec zendora-api-1 python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
+            echo "Health check:"
+            docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health', timeout=10).read().decode())"
