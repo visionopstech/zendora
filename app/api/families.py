@@ -5,16 +5,58 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import ConflictError, NotFoundException
-from app.dependencies.auth import get_current_user, require_director_with_funeral_home
+from app.core.exceptions import ConflictError, NotFoundException, PermissionDenied
+from app.dependencies.auth import get_current_user, require_super_admin_or_director
 from app.models.user import User, UserRole
 from app.schemas.common import DeliveryAddress, FuneralHomeRef, PaginatedResponse, PaginationParams, UserRef
 from app.schemas.family import FamilyCreate, FamilyResponse, FamilyUpdate
 from app.services.director_scope import director_can_read_family, director_data_scope
 from app.services.family_service import FamilyService
+from app.services.funeral_home_service import FuneralHomeService
 from app.services.user_service import UserService
 
 router = APIRouter()
+
+
+async def _resolve_family_assignment(
+    current_user: User,
+    family_data: FamilyCreate,
+    user_service: UserService,
+) -> tuple[Optional[UUID], Optional[UUID]]:
+    """
+    Decide which director and funeral home a new family should be assigned to.
+
+    Directors are always assigned to themselves and their funeral home.
+    Super admins may omit both, or supply either; a director without an
+    explicit funeral home inherits that director's home.
+    """
+    if current_user.role == UserRole.DIRECTOR.value:
+        if not current_user.funeral_home_id:
+            raise ConflictError("Director is not assigned to a funeral home yet")
+        return current_user.id, current_user.funeral_home_id
+
+    if current_user.role != UserRole.SUPER_ADMIN.value:
+        raise PermissionDenied("This action requires one of the following roles: SUPER_ADMIN, DIRECTOR")
+
+    director_id = family_data.director_id
+    funeral_home_id = family_data.funeral_home_id
+    director = None
+
+    if director_id:
+        director = await user_service.get_by_id(director_id)
+        if not director:
+            raise NotFoundException("Director not found")
+        if director.role != UserRole.DIRECTOR.value:
+            raise PermissionDenied("Specified director_id must belong to a DIRECTOR user")
+
+    if funeral_home_id:
+        funeral_home = await FuneralHomeService(user_service.db).get_by_id(funeral_home_id)
+        if not funeral_home:
+            raise NotFoundException("Funeral home not found")
+    elif director:
+        funeral_home_id = director.funeral_home_id
+
+    return director_id, funeral_home_id
 
 
 def _assert_can_access_family(current_user: User, family: User, *, action: str) -> None:
@@ -71,14 +113,20 @@ async def create_family(
     family_data: FamilyCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_director_with_funeral_home),
+    current_user: User = Depends(require_super_admin_or_director),
 ):
     """
-    Create a family admin account (DIRECTOR only).
+    Create a family admin account (SUPER_ADMIN or DIRECTOR).
 
+    Directors are assigned to themselves and their funeral home.
+    Super admins may omit director and funeral home, or supply either.
     Does not create a gift collection. Credentials are emailed to the family.
     """
     user_service = UserService(db)
+    director_id, funeral_home_id = await _resolve_family_assignment(
+        current_user, family_data, user_service
+    )
+
     existing = await user_service.get_by_email(family_data.email)
     if existing:
         raise HTTPException(
@@ -90,8 +138,8 @@ async def create_family(
         email=family_data.email,
         first_name=family_data.first_name,
         last_name=family_data.last_name,
-        director_id=current_user.id,
-        funeral_home_id=current_user.funeral_home_id,
+        director_id=director_id,
+        funeral_home_id=funeral_home_id,
         deceased_first_name=family_data.deceased_first_name,
         deceased_last_name=family_data.deceased_last_name,
         address=family_data.address.model_dump(),

@@ -8,7 +8,7 @@ from app.schemas.common import DeliveryAddress, FuneralHomeRef, UserRef
 
 
 class FamilyCreate(BaseModel):
-    """Schema for a director creating a family admin account."""
+    """Schema for creating a family admin account."""
 
     first_name: str = Field(..., min_length=1, max_length=255)
     last_name: str = Field(..., min_length=1, max_length=255)
@@ -16,6 +16,14 @@ class FamilyCreate(BaseModel):
     deceased_first_name: str = Field(..., min_length=1, max_length=255)
     deceased_last_name: str = Field(..., min_length=1, max_length=255)
     address: DeliveryAddress
+    director_id: Optional[UUID] = Field(
+        None,
+        description="Director to assign. SUPER_ADMIN only; directors are assigned to themselves.",
+    )
+    funeral_home_id: Optional[UUID] = Field(
+        None,
+        description="Funeral home to assign. SUPER_ADMIN only; omitted inherits from the director.",
+    )
 
 
 class FamilyUpdate(BaseModel):

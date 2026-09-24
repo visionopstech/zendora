@@ -18,7 +18,7 @@ os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
 from app.api import directors as directors_api
 from app.api import families as families_api
-from app.core.exceptions import ConflictError, PermissionDenied
+from app.core.exceptions import ConflictError, NotFoundException, PermissionDenied
 from app.models.gift_collection import GiftCollectionStatus
 from app.models.user import UserRole
 from app.schemas.common import DeliveryAddress
@@ -69,6 +69,27 @@ def make_user(role: UserRole, **kwargs):
         deceased_last_name=kwargs.get("deceased_last_name"),
         address=kwargs.get("address"),
         director=kwargs.get("director"),
+    )
+
+
+def family_create_payload(**kwargs) -> FamilyCreate:
+    return FamilyCreate(
+        first_name=kwargs.get("first_name", "Alex"),
+        last_name=kwargs.get("last_name", "Rivera"),
+        email=kwargs.get("email", "family@example.com"),
+        deceased_first_name=kwargs.get("deceased_first_name", "Sam"),
+        deceased_last_name=kwargs.get("deceased_last_name", "Rivera"),
+        address=kwargs.get(
+            "address",
+            DeliveryAddress(
+                street="1 Main",
+                city="Austin",
+                state="TX",
+                zip_code="78701",
+            ),
+        ),
+        director_id=kwargs.get("director_id"),
+        funeral_home_id=kwargs.get("funeral_home_id"),
     )
 
 
@@ -219,15 +240,45 @@ async def test_vendor_create_rejects_duplicate_email():
         vendor_service_module.UserManagementService = original
 
 
+def _mock_family_create(monkeypatch, created, user_service=None, funeral_home=None):
+    user_service = user_service or SimpleNamespace(
+        get_by_email=AsyncMock(return_value=None),
+        get_by_id=AsyncMock(return_value=None),
+        create_family_admin_with_director=AsyncMock(return_value=(created, "tmp-pass")),
+        db=SimpleNamespace(),
+    )
+    family_service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=created),
+        get_collection_stats=AsyncMock(return_value={created.id: {"count": 0}}),
+    )
+    funeral_home_service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=funeral_home),
+    )
+
+    monkeypatch.setattr(families_api, "UserService", lambda _: user_service)
+    monkeypatch.setattr(families_api, "FamilyService", lambda _: family_service)
+    monkeypatch.setattr(families_api, "FuneralHomeService", lambda _: funeral_home_service)
+
+    class FakeEmail:
+        async def send_family_admin_credentials_email(self, *_args, **_kwargs):
+            return True
+
+    import app.services.email_service as email_module
+    monkeypatch.setattr(email_module, "EmailService", FakeEmail)
+    return user_service, funeral_home_service
+
+
 @pytest.mark.asyncio
 async def test_family_create_requires_funeral_home():
-    from app.core.exceptions import ConflictError as AppConflict
-    from app.dependencies.auth import require_director_with_funeral_home
-
     current_user = make_user(UserRole.DIRECTOR, funeral_home_id=None)
 
-    with pytest.raises(AppConflict) as exc:
-        await require_director_with_funeral_home(current_user=current_user)
+    with pytest.raises(ConflictError) as exc:
+        await families_api.create_family(
+            family_data=family_create_payload(),
+            background_tasks=BackgroundTasks(),
+            db=SimpleNamespace(),
+            current_user=current_user,
+        )
 
     assert "not assigned to a funeral home" in str(exc.value)
 
@@ -256,42 +307,10 @@ async def test_family_create_endpoint(monkeypatch):
         funeral_home=make_home(id=home_id, director_id=current_user.id),
         director=current_user,
     )
-    user_service = SimpleNamespace(
-        get_by_email=AsyncMock(return_value=None),
-        create_family_admin_with_director=AsyncMock(return_value=(created, "tmp-pass")),
-    )
-    family_service = SimpleNamespace(
-        get_by_id=AsyncMock(return_value=created),
-        get_collection_stats=AsyncMock(return_value={created.id: {"count": 0}}),
-    )
-
-    monkeypatch.setattr(families_api, "UserService", lambda _: user_service)
-    monkeypatch.setattr(families_api, "FamilyService", lambda _: family_service)
-    monkeypatch.setattr(families_api, "EmailService", lambda: SimpleNamespace(
-        send_family_admin_credentials_email=AsyncMock()
-    ), raising=False)
-
-    class FakeEmail:
-        async def send_family_admin_credentials_email(self, *_args, **_kwargs):
-            return True
-
-    import app.services.email_service as email_module
-    monkeypatch.setattr(email_module, "EmailService", FakeEmail)
+    user_service, _ = _mock_family_create(monkeypatch, created)
 
     response = await families_api.create_family(
-        family_data=FamilyCreate(
-            first_name="Alex",
-            last_name="Rivera",
-            email="family@example.com",
-            deceased_first_name="Sam",
-            deceased_last_name="Rivera",
-            address=DeliveryAddress(
-                street="1 Main",
-                city="Austin",
-                state="TX",
-                zip_code="78701",
-            ),
-        ),
+        family_data=family_create_payload(),
         background_tasks=BackgroundTasks(),
         db=db,
         current_user=current_user,
@@ -302,6 +321,163 @@ async def test_family_create_endpoint(monkeypatch):
     assert response.deceased_first_name == "Sam"
     assert response.deceased_last_name == "Rivera"
     user_service.create_family_admin_with_director.assert_awaited_once()
+    kwargs = user_service.create_family_admin_with_director.await_args.kwargs
+    assert kwargs["director_id"] == current_user.id
+    assert kwargs["funeral_home_id"] == home_id
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_create_family_without_assignment(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    created = make_user(
+        UserRole.FAMILY_ADMIN,
+        email="family@example.com",
+        director_id=None,
+        funeral_home_id=None,
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
+        address={
+            "street": "1 Main",
+            "city": "Austin",
+            "state": "TX",
+            "zip_code": "78701",
+            "country": "USA",
+        },
+    )
+    user_service, _ = _mock_family_create(monkeypatch, created)
+
+    response = await families_api.create_family(
+        family_data=family_create_payload(),
+        background_tasks=BackgroundTasks(),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.email == "family@example.com"
+    assert response.director is None
+    assert response.funeral_home is None
+    kwargs = user_service.create_family_admin_with_director.await_args.kwargs
+    assert kwargs["director_id"] is None
+    assert kwargs["funeral_home_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_create_family_with_director(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    home_id = uuid4()
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    created = make_user(
+        UserRole.FAMILY_ADMIN,
+        email="family@example.com",
+        director_id=director.id,
+        funeral_home_id=home_id,
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
+        funeral_home=make_home(id=home_id, director_id=director.id),
+        director=director,
+    )
+    user_service = SimpleNamespace(
+        get_by_email=AsyncMock(return_value=None),
+        get_by_id=AsyncMock(return_value=director),
+        create_family_admin_with_director=AsyncMock(return_value=(created, "tmp-pass")),
+        db=SimpleNamespace(),
+    )
+    _mock_family_create(monkeypatch, created, user_service=user_service)
+
+    response = await families_api.create_family(
+        family_data=family_create_payload(director_id=director.id),
+        background_tasks=BackgroundTasks(),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.director.id == director.id
+    kwargs = user_service.create_family_admin_with_director.await_args.kwargs
+    assert kwargs["director_id"] == director.id
+    assert kwargs["funeral_home_id"] == home_id
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_create_family_with_funeral_home_only(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    home_id = uuid4()
+    home = make_home(id=home_id)
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    created = make_user(
+        UserRole.FAMILY_ADMIN,
+        email="family@example.com",
+        director_id=None,
+        funeral_home_id=home_id,
+        deceased_first_name="Sam",
+        deceased_last_name="Rivera",
+        funeral_home=home,
+    )
+    user_service, funeral_home_service = _mock_family_create(
+        monkeypatch, created, funeral_home=home
+    )
+
+    response = await families_api.create_family(
+        family_data=family_create_payload(funeral_home_id=home_id),
+        background_tasks=BackgroundTasks(),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.funeral_home.id == home_id
+    funeral_home_service.get_by_id.assert_awaited_once_with(home_id)
+    kwargs = user_service.create_family_admin_with_director.await_args.kwargs
+    assert kwargs["director_id"] is None
+    assert kwargs["funeral_home_id"] == home_id
+
+
+@pytest.mark.asyncio
+async def test_super_admin_family_create_rejects_unknown_director(monkeypatch):
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    missing_director_id = uuid4()
+    user_service = SimpleNamespace(
+        get_by_email=AsyncMock(return_value=None),
+        get_by_id=AsyncMock(return_value=None),
+        create_family_admin_with_director=AsyncMock(),
+        db=SimpleNamespace(),
+    )
+    monkeypatch.setattr(families_api, "UserService", lambda _: user_service)
+
+    with pytest.raises(NotFoundException) as exc:
+        await families_api.create_family(
+            family_data=family_create_payload(director_id=missing_director_id),
+            background_tasks=BackgroundTasks(),
+            db=SimpleNamespace(),
+            current_user=current_user,
+        )
+
+    assert "Director not found" in str(exc.value)
+    user_service.create_family_admin_with_director.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_super_admin_family_create_rejects_non_director(monkeypatch):
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    family_admin = make_user(UserRole.FAMILY_ADMIN)
+    user_service = SimpleNamespace(
+        get_by_email=AsyncMock(return_value=None),
+        get_by_id=AsyncMock(return_value=family_admin),
+        create_family_admin_with_director=AsyncMock(),
+        db=SimpleNamespace(),
+    )
+    monkeypatch.setattr(families_api, "UserService", lambda _: user_service)
+
+    with pytest.raises(PermissionDenied) as exc:
+        await families_api.create_family(
+            family_data=family_create_payload(director_id=family_admin.id),
+            background_tasks=BackgroundTasks(),
+            db=SimpleNamespace(),
+            current_user=current_user,
+        )
+
+    assert "must belong to a DIRECTOR user" in str(exc.value)
+    user_service.create_family_admin_with_director.assert_not_awaited()
 
 
 @pytest.mark.asyncio

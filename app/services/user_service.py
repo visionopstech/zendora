@@ -112,7 +112,7 @@ class UserService:
         email: str,
         first_name: str,
         last_name: str,
-        director_id: UUID,
+        director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         deceased_first_name: Optional[str] = None,
         deceased_last_name: Optional[str] = None,
@@ -120,7 +120,9 @@ class UserService:
     ) -> tuple[User, str]:
         """
         Create a family admin user with a generated password.
-        Returns the user and the plain text password.
+
+        Director and funeral home are optional so a SUPER_ADMIN can create an
+        unassigned family. Returns the user and the plain text password.
         """
         password = self.generate_password()
         
