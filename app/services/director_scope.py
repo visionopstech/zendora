@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
+from app.core.exceptions import ConflictError, PermissionDenied
 from app.models.gift_collection import GiftCollection
 from app.models.order import Order
 from app.models.user import User, UserRole
@@ -61,4 +62,33 @@ def director_can_read_order(user: User, order: Order) -> bool:
     return (
         order.gift_collection is not None
         and order.gift_collection.director_id == user.id
+    )
+
+
+def assert_can_delete_director(actor: User, target: User) -> None:
+    """
+    Super admins may delete any director. A main director may delete other
+    non-main directors on their own funeral home.
+    """
+    if target.role != UserRole.DIRECTOR.value:
+        raise ConflictError("Target user is not a director")
+
+    if actor.role == UserRole.SUPER_ADMIN.value:
+        return
+
+    if actor.role == UserRole.DIRECTOR.value and is_main_director(actor):
+        if actor.id == target.id:
+            raise PermissionDenied("You cannot delete your own director account")
+        if is_main_director(target):
+            raise ConflictError(
+                "Cannot delete the main director. Set a new main director first."
+            )
+        if target.funeral_home_id != actor.funeral_home_id:
+            raise PermissionDenied(
+                "You can only delete directors in your funeral home"
+            )
+        return
+
+    raise PermissionDenied(
+        "Only the main director or a super admin can delete directors"
     )

@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.user import DirectorStatisticsResponse, DirectorStatusUpdate, UserResponse
 from app.services.director_statistics_service import DirectorStatisticsService
 from app.services.director_status_service import DirectorStatusService
+from app.services.user_management_service import UserManagementService
 
 router = APIRouter()
 
@@ -54,6 +55,31 @@ async def update_director_status(
         )
         await db.commit()
         return UserResponse.model_validate(user)
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except PermissionDenied as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.delete("/directors/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_director(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_super_admin_or_director),
+):
+    """
+    Delete a director account.
+
+    Super admins may delete any director. A main director may delete other
+    non-main directors on their own funeral home.
+    """
+    service = UserManagementService(db)
+
+    try:
+        await service.delete_director(user_id, actor=current_user)
+        await db.commit()
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ConflictError as e:

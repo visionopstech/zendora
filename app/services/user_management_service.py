@@ -10,6 +10,7 @@ from app.models.user import User, UserRole
 from app.models.vendor import Vendor
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
+from app.services.director_scope import assert_can_delete_director, is_main_director
 from app.services.financial_service import FinancialService
 
 
@@ -316,13 +317,43 @@ class UserManagementService:
         
         return user
     
-    async def delete(self, user_id: UUID) -> None:
-        """Delete a user."""
+    async def delete(self, user_id: UUID, actor: Optional[User] = None) -> None:
+        """
+        Delete a user.
+
+        Super admins may delete anyone, including main directors. A main
+        director may delete other non-main directors on their funeral home.
+        """
         user = await self.get_by_id(user_id)
         
         if not user:
             raise NotFoundException("User not found")
-        
+
+        if actor is not None:
+            if user.role == UserRole.DIRECTOR.value:
+                assert_can_delete_director(actor, user)
+            elif actor.role != UserRole.SUPER_ADMIN.value:
+                raise PermissionDenied("Only a super admin can delete this user")
+
+        await self._delete_user(user)
+
+    async def delete_director(self, user_id: UUID, actor: User) -> None:
+        """Delete a director, enforcing director-management permissions."""
+        user = await self.get_by_id(user_id)
+        if not user:
+            raise NotFoundException("User not found")
+        assert_can_delete_director(actor, user)
+        await self._delete_user(user)
+
+    async def _delete_user(self, user: User) -> None:
+        if (
+            user.role == UserRole.DIRECTOR.value
+            and is_main_director(user)
+            and user.funeral_home is not None
+        ):
+            user.funeral_home.director_id = None
+            await self.db.flush()
+
         await self.db.delete(user)
         await self.db.flush()
     

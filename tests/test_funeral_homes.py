@@ -123,6 +123,45 @@ async def test_remove_director_rejects_main_director():
 
 
 @pytest.mark.asyncio
+async def test_remove_director_main_can_remove_other():
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id)
+    main.funeral_home = make_funeral_home(id=home_id, director_id=main.id)
+    funeral_home = make_funeral_home(id=home_id, director_id=main.id)
+    other = make_user(UserRole.DIRECTOR, funeral_home_id=home_id)
+    service = FuneralHomeService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=funeral_home)
+    service._cascade_funeral_home = AsyncMock()
+    service.db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: other)
+    )
+    service.db.flush = AsyncMock()
+
+    result = await service.remove_director(funeral_home.id, other.id, actor=main)
+
+    assert other.funeral_home_id is None
+    assert result == funeral_home
+
+
+@pytest.mark.asyncio
+async def test_remove_director_other_director_forbidden():
+    home_id = uuid4()
+    main_id = uuid4()
+    actor = make_user(UserRole.DIRECTOR, funeral_home_id=home_id)
+    actor.funeral_home = make_funeral_home(id=home_id, director_id=main_id)
+    funeral_home = make_funeral_home(id=home_id, director_id=main_id)
+    other = make_user(UserRole.DIRECTOR, funeral_home_id=home_id)
+    service = FuneralHomeService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=funeral_home)
+    service.db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: other)
+    )
+
+    with pytest.raises(PermissionDenied):
+        await service.remove_director(funeral_home.id, other.id, actor=actor)
+
+
+@pytest.mark.asyncio
 async def test_create_funeral_home_assigns_director_when_provided(monkeypatch):
     db = SimpleNamespace(commit=AsyncMock())
     director = make_user(UserRole.DIRECTOR)

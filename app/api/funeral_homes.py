@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.exceptions import ConflictError, NotFoundException, PermissionDenied
-from app.dependencies.auth import get_current_user, require_director, require_super_admin
+from app.dependencies.auth import (
+    get_current_user,
+    require_director,
+    require_super_admin,
+    require_super_admin_or_director,
+)
 from app.models.funeral_home import FuneralHome
 from app.models.user import User, UserRole
 from app.schemas.common import PaginatedResponse, PaginationParams, UserRef
@@ -302,13 +307,20 @@ async def remove_director(
     funeral_home_id: UUID,
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_super_admin_or_director),
 ):
-    """Remove a non-main director from a funeral home (SUPER_ADMIN only)."""
+    """
+    Remove a non-main director from a funeral home.
+
+    Super admins may remove any non-main director. A main director may remove
+    other non-main directors on their own funeral home.
+    """
     service = FuneralHomeService(db)
 
     try:
-        funeral_home = await service.remove_director(funeral_home_id, user_id)
+        funeral_home = await service.remove_director(
+            funeral_home_id, user_id, actor=current_user
+        )
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
         return await _build_response(service, funeral_home)

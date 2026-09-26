@@ -24,7 +24,12 @@ from app.models.user import UserRole
 from app.schemas.common import DeliveryAddress
 from app.schemas.family import FamilyCreate, FamilyUpdate
 from app.schemas.user import DirectorStatusUpdate
-from app.services.director_scope import director_can_read_family, director_data_scope, is_main_director
+from app.services.director_scope import (
+    assert_can_delete_director,
+    director_can_read_family,
+    director_data_scope,
+    is_main_director,
+)
 from app.services.director_status_service import DirectorStatusService
 from app.services.gift_collection_service import (
     MAX_COLLECTIONS_PER_DIRECTOR,
@@ -755,3 +760,141 @@ async def test_director_status_endpoint_maps_conflict(monkeypatch):
         )
 
     assert exc.value.status_code == 409
+
+
+def test_super_admin_can_delete_any_director():
+    admin = make_user(UserRole.SUPER_ADMIN)
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    other = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=main.id),
+    )
+
+    assert_can_delete_director(admin, main)
+    assert_can_delete_director(admin, other)
+
+
+def test_main_director_can_delete_other_non_main_director():
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    other = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=main.id),
+    )
+
+    assert_can_delete_director(main, other)
+
+
+def test_main_director_cannot_delete_self():
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+
+    with pytest.raises(PermissionDenied):
+        assert_can_delete_director(main, main)
+
+
+def test_main_director_cannot_delete_director_from_other_home():
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    stranger = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=uuid4(),
+        funeral_home=make_home(id=uuid4(), director_id=uuid4()),
+    )
+
+    with pytest.raises(PermissionDenied):
+        assert_can_delete_director(main, stranger)
+
+
+def test_non_main_director_cannot_delete_directors():
+    home_id = uuid4()
+    main_id = uuid4()
+    actor = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=main_id),
+    )
+    target = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=main_id),
+    )
+
+    with pytest.raises(PermissionDenied):
+        assert_can_delete_director(actor, target)
+
+
+@pytest.mark.asyncio
+async def test_delete_director_super_admin_clears_main_assignment():
+    home_id = uuid4()
+    home = make_home(id=home_id, director_id=uuid4())
+    target = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, funeral_home=home)
+    home.director_id = target.id
+    admin = make_user(UserRole.SUPER_ADMIN)
+    service = UserManagementService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=target)
+    service.db.flush = AsyncMock()
+    service.db.delete = AsyncMock()
+
+    await service.delete_director(target.id, actor=admin)
+
+    assert home.director_id is None
+    service.db.delete.assert_awaited_once_with(target)
+
+
+@pytest.mark.asyncio
+async def test_delete_director_main_can_delete_other():
+    home_id = uuid4()
+    main = make_user(UserRole.DIRECTOR, funeral_home_id=home_id, is_main=True)
+    other = make_user(
+        UserRole.DIRECTOR,
+        funeral_home_id=home_id,
+        funeral_home=make_home(id=home_id, director_id=main.id),
+    )
+    service = UserManagementService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=other)
+    service.db.flush = AsyncMock()
+    service.db.delete = AsyncMock()
+
+    await service.delete_director(other.id, actor=main)
+
+    service.db.delete.assert_awaited_once_with(other)
+
+
+@pytest.mark.asyncio
+async def test_delete_director_endpoint_allows_super_admin(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    current_user = make_user(UserRole.SUPER_ADMIN)
+    service = SimpleNamespace(delete_director=AsyncMock())
+    monkeypatch.setattr(directors_api, "UserManagementService", lambda _: service)
+
+    await directors_api.delete_director(
+        user_id=uuid4(),
+        db=db,
+        current_user=current_user,
+    )
+
+    service.delete_director.assert_awaited_once()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_director_endpoint_maps_permission_denied(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    current_user = make_user(UserRole.DIRECTOR)
+    service = SimpleNamespace(
+        delete_director=AsyncMock(side_effect=PermissionDenied("Only the main director"))
+    )
+    monkeypatch.setattr(directors_api, "UserManagementService", lambda _: service)
+
+    with pytest.raises(HTTPException) as exc:
+        await directors_api.delete_director(
+            user_id=uuid4(),
+            db=db,
+            current_user=current_user,
+        )
+
+    assert exc.value.status_code == 403

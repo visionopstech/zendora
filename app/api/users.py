@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.models.user import User, UserRole
-from app.dependencies.auth import get_current_user, require_super_admin
+from app.dependencies.auth import get_current_user, require_super_admin, require_super_admin_or_director
 from app.services.director_scope import director_can_read_family, is_main_director
 from app.schemas.common import PaginatedResponse, PaginationParams
 from app.schemas.user import UserCreate, UserManagementUpdate, UserResponse, ProfileUpdate
@@ -261,20 +261,33 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_super_admin_or_director)
 ):
     """
-    Delete user (SUPER_ADMIN only).
-    
+    Delete a user.
+
+    Super admins may delete any user, including main directors. A main
+    director may delete other non-main directors on their funeral home.
+
     WARNING: This is a hard delete and will cascade to related records.
     """
     user_service = UserManagementService(db)
     
     try:
-        await user_service.delete(user_id)
+        await user_service.delete(user_id, actor=current_user)
         await db.commit()
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
+    except PermissionDenied as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )

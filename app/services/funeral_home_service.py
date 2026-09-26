@@ -9,6 +9,7 @@ from app.core.exceptions import ConflictError, NotFoundException, PermissionDeni
 from app.models.funeral_home import FuneralHome
 from app.models.gift_collection import GiftCollection
 from app.models.user import User, UserRole
+from app.services.director_scope import is_main_director
 
 
 class FuneralHomeService:
@@ -254,7 +255,12 @@ class FuneralHomeService:
         await self.db.flush()
         return await self.get_by_id(funeral_home_id)
 
-    async def remove_director(self, funeral_home_id: UUID, user_id: UUID) -> FuneralHome:
+    async def remove_director(
+        self,
+        funeral_home_id: UUID,
+        user_id: UUID,
+        actor: Optional[User] = None,
+    ) -> FuneralHome:
         """Remove a non-main director from a funeral home."""
         funeral_home = await self.get_by_id(funeral_home_id)
         if not funeral_home:
@@ -268,6 +274,19 @@ class FuneralHomeService:
             raise ConflictError(
                 "Cannot remove the main director. Set a new main director first."
             )
+
+        if actor is not None:
+            if actor.role == UserRole.SUPER_ADMIN.value:
+                pass
+            elif actor.role == UserRole.DIRECTOR.value and is_main_director(actor):
+                if actor.funeral_home_id != funeral_home_id:
+                    raise PermissionDenied(
+                        "You can only remove directors from your funeral home"
+                    )
+            else:
+                raise PermissionDenied(
+                    "Only the main director or a super admin can remove directors"
+                )
 
         director.funeral_home_id = None
         await self._cascade_funeral_home(user_id, None)
