@@ -94,6 +94,7 @@ async def _resolve_default_collection(
     default_service: DefaultGiftCollectionService,
     default_collection_id: UUID,
     current_user: User,
+    family_admin: Optional[User] = None,
 ):
     """Load a default collection and verify the caller may build from it."""
     default_collection = await default_service.get_by_id(
@@ -112,15 +113,24 @@ async def _resolve_default_collection(
             detail="Default gift collection is inactive",
         )
 
-    if current_user.role == UserRole.FAMILY_ADMIN.value:
-        applicable = await default_service.is_applicable_to_family_admin(
-            current_user, default_collection
+    if current_user.role == UserRole.SUPER_ADMIN.value:
+        return default_collection
+
+    # A default is usable when it is in the caller's own resolved set, or in
+    # the set of the family the collection is being built for.
+    applicable = await default_service.is_applicable_to_user(
+        current_user, default_collection
+    )
+    if not applicable and family_admin is not None and family_admin.id != current_user.id:
+        applicable = await default_service.is_applicable_to_user(
+            family_admin, default_collection
         )
-        if not applicable:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This default gift collection is not available to you",
-            )
+
+    if not applicable:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This default gift collection is not available to you",
+        )
 
     return default_collection
 
@@ -149,6 +159,7 @@ async def create_gift_collection(
     user_service = UserService(db)
 
     new_family_admin: Optional[tuple[User, str]] = None
+    family_admin: Optional[User] = None
 
     try:
         if current_user.role == UserRole.DIRECTOR.value:
@@ -177,6 +188,7 @@ async def create_gift_collection(
             funeral_home_id = current_user.funeral_home_id
 
         elif current_user.role == UserRole.FAMILY_ADMIN.value:
+            family_admin = current_user
             family_admin_id = current_user.id
             director_id = current_user.director_id
             funeral_home_id = current_user.funeral_home_id
@@ -213,7 +225,10 @@ async def create_gift_collection(
 
         if collection_data.default_collection_id:
             default_collection = await _resolve_default_collection(
-                default_service, collection_data.default_collection_id, current_user
+                default_service,
+                collection_data.default_collection_id,
+                current_user,
+                family_admin,
             )
 
             collection = await collection_service.create_from_default_collection(

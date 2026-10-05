@@ -17,7 +17,7 @@ class DefaultCollectionScope(str, enum.Enum):
 
 
 class DefaultGiftCollection(Base):
-    """A reusable gift collection preset owned by Zendora or by a funeral home."""
+    """A reusable gift collection preset owned by Zendora or by a single user."""
 
     __tablename__ = "default_gift_collections"
 
@@ -36,6 +36,13 @@ class DefaultGiftCollection(Base):
     )
     funeral_home_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("funeral_homes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # The user whose own defaults these are. NULL is the shared Zendora pool,
+    # which every hierarchy falls back to.
+    owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -68,6 +75,11 @@ class DefaultGiftCollection(Base):
         foreign_keys=[created_by],
         back_populates="created_default_gift_collections",
     )
+    owner: Mapped[Optional["User"]] = relationship(
+        "User",
+        foreign_keys=[owner_user_id],
+        back_populates="owned_default_gift_collections",
+    )
     funeral_home: Mapped[Optional["FuneralHome"]] = relationship(
         "FuneralHome",
         back_populates="default_gift_collections",
@@ -85,6 +97,13 @@ class DefaultGiftCollection(Base):
     @property
     def is_zendora_default(self) -> bool:
         return self.owner_scope == DefaultCollectionScope.ZENDORA.value
+
+    @property
+    def owner_level_id(self) -> Optional[uuid.UUID]:
+        """The hierarchy level this preset sits on; None means Zendora."""
+        if self.owner_scope == DefaultCollectionScope.ZENDORA.value:
+            return None
+        return self.owner_user_id
 
     def __repr__(self) -> str:
         return (
@@ -131,3 +150,4 @@ class DefaultGiftCollectionProduct(Base):
 
 Index("idx_default_gift_collections_name", DefaultGiftCollection.name)
 Index("idx_default_gift_collections_created_by", DefaultGiftCollection.created_by)
+Index("idx_default_gift_collections_owner_user_id", DefaultGiftCollection.owner_user_id)

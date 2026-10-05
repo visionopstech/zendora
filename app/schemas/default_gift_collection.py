@@ -35,11 +35,13 @@ class DefaultGiftCollectionBase(BaseModel):
 class DefaultGiftCollectionCreate(DefaultGiftCollectionBase):
     """Schema for creating a default gift collection.
 
-    The owner scope is derived from the caller: a super admin always creates
-    ZENDORA defaults, a director always creates FUNERAL_HOME defaults for their
-    own funeral home.
+    The owner defaults to the caller: a super admin creates ZENDORA defaults, a
+    director creates their own. Set `owner_user_id` to create a default owned
+    by a user the caller is responsible for, such as one of their family
+    admins.
     """
 
+    owner_user_id: Optional[UUID] = None
     products: List[DefaultGiftCollectionProductInput] = Field(default_factory=list)
 
 
@@ -96,11 +98,17 @@ class DefaultGiftCollectionResponse(DefaultGiftCollectionBase):
 
     id: UUID
     owner_scope: DefaultCollectionScope
+    owner_user_id: Optional[UUID] = None
     funeral_home_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     products: List[DefaultCollectionProductResponse] = Field(default_factory=list)
+
+    # Set per request: inherited defaults come from a user above the caller and
+    # are read-only for them.
+    is_inherited: bool = False
+    can_edit: bool = False
 
     @field_validator("products", mode="before")
     @classmethod

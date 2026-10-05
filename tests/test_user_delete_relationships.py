@@ -27,5 +27,6 @@ def test_user_delete_does_not_null_required_cascade_fks():
         "orders",
         "wallet",
         "order_commissions",
+        "owned_default_gift_collections",
     ):
         assert mapper.relationships[name].passive_deletes is True, name

@@ -78,11 +78,18 @@ def make_collection(**kwargs):
 
 
 def make_default(**kwargs):
+    owner_scope = kwargs.get("owner_scope", DefaultCollectionScope.ZENDORA.value)
+    owner_user_id = kwargs.get("owner_user_id")
+    if owner_scope == DefaultCollectionScope.ZENDORA.value:
+        owner_user_id = None
+
     return SimpleNamespace(
         id=kwargs.get("id", uuid4()),
         name=kwargs.get("name", "New baby"),
         description=kwargs.get("description", "Starter bundle"),
-        owner_scope=kwargs.get("owner_scope", DefaultCollectionScope.ZENDORA.value),
+        owner_scope=owner_scope,
+        owner_user_id=owner_user_id,
+        owner_level_id=owner_user_id,
         funeral_home_id=kwargs.get("funeral_home_id"),
         collection_title=kwargs.get("collection_title", "Baby essentials"),
         collection_description=kwargs.get("collection_description", "Default description"),
@@ -190,63 +197,187 @@ async def test_create_from_default_allows_explicit_empty_product_override():
     service.create_with_products.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_resolve_for_family_admin_uses_funeral_home_defaults_when_present():
+def make_hierarchy_service(users, main_director_ids):
+    """A service whose hierarchy lookups are served from dicts instead of the DB."""
     service = DefaultGiftCollectionService(AsyncMock())
+
+    async def get_user(user_id):
+        return users.get(user_id)
+
+    async def get_main_director_id(funeral_home_id):
+        return main_director_ids.get(funeral_home_id)
+
+    service.get_user = get_user
+    service.get_main_director_id = get_main_director_id
+    return service
+
+
+@pytest.mark.asyncio
+async def test_owner_chain_walks_family_admin_up_to_zendora():
     funeral_home_id = uuid4()
-    funeral_home_defaults = [make_default(owner_scope=DefaultCollectionScope.FUNERAL_HOME.value)]
-    zendora_defaults = [make_default(owner_scope=DefaultCollectionScope.ZENDORA.value)]
-
-    async def list_collections(**kwargs):
-        if kwargs.get("owner_scope") == DefaultCollectionScope.FUNERAL_HOME:
-            return funeral_home_defaults, len(funeral_home_defaults)
-        return zendora_defaults, len(zendora_defaults)
-
-    service.list_collections = list_collections
-    result = await service.resolve_for_family_admin(
-        SimpleNamespace(funeral_home_id=funeral_home_id)
+    main_director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    family_admin = make_user(
+        UserRole.FAMILY_ADMIN,
+        director_id=director.id,
+        funeral_home_id=funeral_home_id,
     )
-    assert result == funeral_home_defaults
-
-
-@pytest.mark.asyncio
-async def test_resolve_for_family_admin_falls_back_to_zendora():
-    service = DefaultGiftCollectionService(AsyncMock())
-    zendora_defaults = [make_default(owner_scope=DefaultCollectionScope.ZENDORA.value)]
-
-    async def list_collections(**kwargs):
-        if kwargs.get("owner_scope") == DefaultCollectionScope.FUNERAL_HOME:
-            return [], 0
-        return zendora_defaults, len(zendora_defaults)
-
-    service.list_collections = list_collections
-    result = await service.resolve_for_family_admin(
-        SimpleNamespace(funeral_home_id=uuid4())
+    service = make_hierarchy_service(
+        {user.id: user for user in (main_director, director, family_admin)},
+        {funeral_home_id: main_director.id},
     )
-    assert result == zendora_defaults
+
+    chain = await service.owner_chain(family_admin)
+
+    assert chain == [family_admin.id, director.id, main_director.id, None]
 
 
 @pytest.mark.asyncio
-async def test_resolve_for_family_admin_without_funeral_home_uses_zendora():
+async def test_owner_chain_of_main_director_is_self_then_zendora():
+    funeral_home_id = uuid4()
+    main_director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    service = make_hierarchy_service(
+        {main_director.id: main_director}, {funeral_home_id: main_director.id}
+    )
+
+    assert await service.owner_chain(main_director) == [main_director.id, None]
+
+
+@pytest.mark.asyncio
+async def test_owner_chain_of_family_admin_without_director_uses_main_director():
+    funeral_home_id = uuid4()
+    main_director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    family_admin = make_user(
+        UserRole.FAMILY_ADMIN, director_id=None, funeral_home_id=funeral_home_id
+    )
+    service = make_hierarchy_service(
+        {main_director.id: main_director, family_admin.id: family_admin},
+        {funeral_home_id: main_director.id},
+    )
+
+    chain = await service.owner_chain(family_admin)
+
+    assert chain == [family_admin.id, main_director.id, None]
+
+
+@pytest.mark.asyncio
+async def test_owner_chain_of_super_admin_is_zendora_only():
+    service = make_hierarchy_service({}, {})
+    assert await service.owner_chain(make_user(UserRole.SUPER_ADMIN)) == [None]
+
+
+@pytest.mark.asyncio
+async def test_resolve_for_user_prefers_own_defaults():
     service = DefaultGiftCollectionService(AsyncMock())
-    zendora_defaults = [make_default(owner_scope=DefaultCollectionScope.ZENDORA.value)]
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
+    own = [make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=director.id,
+    )]
 
-    async def list_collections(**kwargs):
-        assert kwargs.get("owner_scope") == DefaultCollectionScope.ZENDORA
-        return zendora_defaults, len(zendora_defaults)
+    service.owner_chain = AsyncMock(return_value=[director.id, uuid4(), None])
+    service.list_owned_by = AsyncMock(return_value=own)
 
-    service.list_collections = list_collections
-    result = await service.resolve_for_family_admin(SimpleNamespace(funeral_home_id=None))
-    assert result == zendora_defaults
+    assert await service.resolve_for_user(director) == own
+    assert service.list_owned_by.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_list_defaults_filters_inactive_for_director(monkeypatch):
+async def test_resolve_for_user_falls_back_to_nearest_upper_hand():
+    service = DefaultGiftCollectionService(AsyncMock())
+    main_director_id = uuid4()
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
+    inherited = [make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=main_director_id,
+    )]
+    zendora = [make_default()]
+    owned = {director.id: [], main_director_id: inherited, None: zendora}
+
+    service.owner_chain = AsyncMock(return_value=[director.id, main_director_id, None])
+    service.list_owned_by = AsyncMock(side_effect=lambda owner_id, **_: owned[owner_id])
+
+    # The walk stops at the main director, so Zendora defaults stay hidden.
+    assert await service.resolve_for_user(director) == inherited
+
+
+@pytest.mark.asyncio
+async def test_resolve_for_user_falls_back_to_zendora_when_hierarchy_is_empty():
+    service = DefaultGiftCollectionService(AsyncMock())
+    family_admin = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
+    zendora = [make_default()]
+
+    service.owner_chain = AsyncMock(
+        return_value=[family_admin.id, family_admin.director_id, None]
+    )
+    service.list_owned_by = AsyncMock(
+        side_effect=lambda owner_id, **_: zendora if owner_id is None else []
+    )
+
+    assert await service.resolve_for_user(family_admin) == zendora
+
+
+@pytest.mark.asyncio
+async def test_can_manage_owner_covers_own_and_managed_families():
+    funeral_home_id = uuid4()
+    director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    own_family = make_user(
+        UserRole.FAMILY_ADMIN, director_id=director.id, funeral_home_id=funeral_home_id
+    )
+    other_family = make_user(
+        UserRole.FAMILY_ADMIN, director_id=uuid4(), funeral_home_id=uuid4()
+    )
+    other_director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    service = make_hierarchy_service(
+        {user.id: user for user in (own_family, other_family, other_director)},
+        {funeral_home_id: other_director.id},
+    )
+
+    assert await service.can_manage_owner(director, director.id) is True
+    assert await service.can_manage_owner(director, own_family.id) is True
+    assert await service.can_manage_owner(director, other_family.id) is False
+    # The main director is an upper hand, so their defaults stay read-only.
+    assert await service.can_manage_owner(director, other_director.id) is False
+    # Only super admins own the Zendora pool.
+    assert await service.can_manage_owner(director, None) is False
+
+
+@pytest.mark.asyncio
+async def test_main_director_manages_every_family_in_the_funeral_home():
+    funeral_home_id = uuid4()
+    main_director = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    family_of_other_director = make_user(
+        UserRole.FAMILY_ADMIN, director_id=uuid4(), funeral_home_id=funeral_home_id
+    )
+    service = make_hierarchy_service(
+        {family_of_other_director.id: family_of_other_director},
+        {funeral_home_id: main_director.id},
+    )
+
+    assert await service.can_manage_owner(main_director, family_of_other_director.id) is True
+
+
+@pytest.mark.asyncio
+async def test_family_admin_cannot_manage_any_defaults():
+    family_admin = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
+    service = make_hierarchy_service({family_admin.id: family_admin}, {})
+
+    assert await service.can_manage_owner(family_admin, family_admin.id) is False
+    assert await service.can_manage_owner(family_admin, None) is False
+
+
+@pytest.mark.asyncio
+async def test_director_listing_returns_resolved_defaults(monkeypatch):
     db = SimpleNamespace()
     current_user = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
-    default_collection = make_default(products=[])
+    own = make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=current_user.id,
+        products=[],
+    )
     service = SimpleNamespace(
-        list_collections=AsyncMock(return_value=([default_collection], 1))
+        resolve_for_user=AsyncMock(return_value=[own]),
+        can_manage_owner=AsyncMock(return_value=True),
     )
     pagination = make_pagination()
 
@@ -257,6 +388,7 @@ async def test_list_defaults_filters_inactive_for_director(monkeypatch):
     response = await default_collections_api.list_default_gift_collections(
         owner_scope=None,
         funeral_home_id=None,
+        owner_user_id=None,
         include_inactive=True,
         search=None,
         pagination=pagination,
@@ -264,17 +396,114 @@ async def test_list_defaults_filters_inactive_for_director(monkeypatch):
         current_user=current_user,
     )
 
-    service.list_collections.assert_awaited_once()
-    assert service.list_collections.await_args.kwargs["active_only"] is False
+    assert service.resolve_for_user.await_args.kwargs["active_only"] is False
     assert len(response.items) == 1
-    assert response.items[0].name == default_collection.name
+    assert response.items[0].name == own.name
+    assert response.items[0].can_edit is True
+    assert response.items[0].is_inherited is False
+
+
+@pytest.mark.asyncio
+async def test_inherited_defaults_are_flagged_read_only(monkeypatch):
+    db = SimpleNamespace()
+    funeral_home_id = uuid4()
+    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=funeral_home_id)
+    inherited = make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=uuid4(),
+        products=[],
+    )
+    service = SimpleNamespace(
+        resolve_for_user=AsyncMock(return_value=[inherited]),
+        can_manage_owner=AsyncMock(return_value=False),
+    )
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
+
+    response = await default_collections_api.list_default_gift_collections(
+        owner_scope=None,
+        funeral_home_id=None,
+        owner_user_id=None,
+        include_inactive=False,
+        search=None,
+        pagination=make_pagination(),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.items[0].can_edit is False
+    assert response.items[0].is_inherited is True
+
+
+@pytest.mark.asyncio
+async def test_family_admin_sees_own_defaults_without_edit_rights(monkeypatch):
+    db = SimpleNamespace()
+    current_user = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
+    own = make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=current_user.id,
+        products=[],
+    )
+    service = SimpleNamespace(
+        resolve_for_user=AsyncMock(return_value=[own]),
+        can_manage_owner=AsyncMock(return_value=False),
+    )
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
+
+    response = await default_collections_api.list_default_gift_collections(
+        owner_scope=None,
+        funeral_home_id=None,
+        owner_user_id=None,
+        include_inactive=False,
+        search=None,
+        pagination=make_pagination(),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.items[0].owner_user_id == current_user.id
+    assert response.items[0].is_inherited is False
+    assert response.items[0].can_edit is False
+
+
+@pytest.mark.asyncio
+async def test_listing_another_users_defaults_requires_management(monkeypatch):
+    db = SimpleNamespace()
+    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
+    service = SimpleNamespace(can_manage_owner=AsyncMock(return_value=False))
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await default_collections_api.list_default_gift_collections(
+            owner_scope=None,
+            funeral_home_id=None,
+            owner_user_id=uuid4(),
+            include_inactive=False,
+            search=None,
+            pagination=make_pagination(),
+            db=db,
+            current_user=current_user,
+        )
+
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_super_admin_can_include_inactive_defaults(monkeypatch):
     db = SimpleNamespace()
     current_user = make_user(UserRole.SUPER_ADMIN)
-    service = SimpleNamespace(list_collections=AsyncMock(return_value=([], 0)))
+    service = SimpleNamespace(
+        list_collections=AsyncMock(return_value=([], 0)),
+        can_manage_owner=AsyncMock(return_value=True),
+    )
     pagination = make_pagination()
 
     monkeypatch.setattr(
@@ -284,6 +513,7 @@ async def test_super_admin_can_include_inactive_defaults(monkeypatch):
     await default_collections_api.list_default_gift_collections(
         owner_scope=None,
         funeral_home_id=None,
+        owner_user_id=None,
         include_inactive=True,
         search=None,
         pagination=pagination,
@@ -295,13 +525,17 @@ async def test_super_admin_can_include_inactive_defaults(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_director_cannot_modify_zendora_default(monkeypatch):
+async def test_director_cannot_modify_inherited_default(monkeypatch):
     db = SimpleNamespace()
     current_user = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
     default_collection = make_default(
         owner_scope=DefaultCollectionScope.ZENDORA.value, is_active=True
     )
-    service = SimpleNamespace(get_by_id=AsyncMock(return_value=default_collection))
+    service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=default_collection),
+        can_manage_owner=AsyncMock(return_value=False),
+        can_read=AsyncMock(return_value=True),
+    )
 
     monkeypatch.setattr(
         default_collections_api, "DefaultGiftCollectionService", lambda _: service
@@ -316,28 +550,73 @@ async def test_director_cannot_modify_zendora_default(monkeypatch):
         )
 
     assert exc.value.status_code == 403
+    assert "read-only" in exc.value.detail
 
 
 @pytest.mark.asyncio
-async def test_create_default_requires_director_funeral_home():
+async def test_director_creates_defaults_owned_by_themselves(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
+    created = make_default(
+        owner_scope=DefaultCollectionScope.FUNERAL_HOME.value,
+        owner_user_id=current_user.id,
+        created_by=current_user.id,
+    )
+    service = SimpleNamespace(
+        can_manage_owner=AsyncMock(return_value=True),
+        create=AsyncMock(return_value=created),
+        get_by_id=AsyncMock(return_value=created),
+    )
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
+
+    response = await default_collections_api.create_default_gift_collection(
+        collection_data=DefaultGiftCollectionCreate(name="Test default"),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert service.create.await_args.kwargs["owner_user_id"] == current_user.id
+    assert (
+        service.create.await_args.kwargs["owner_scope"]
+        == DefaultCollectionScope.FUNERAL_HOME
+    )
+    assert response.owner_user_id == current_user.id
+
+
+@pytest.mark.asyncio
+async def test_director_cannot_create_default_for_unmanaged_user(monkeypatch):
     db = SimpleNamespace()
-    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=None)
+    current_user = make_user(UserRole.DIRECTOR, funeral_home_id=uuid4())
+    service = SimpleNamespace(can_manage_owner=AsyncMock(return_value=False))
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
 
     with pytest.raises(HTTPException) as exc:
         await default_collections_api.create_default_gift_collection(
-            collection_data=DefaultGiftCollectionCreate(name="Test default"),
+            collection_data=DefaultGiftCollectionCreate(
+                name="Test default", owner_user_id=uuid4()
+            ),
             db=db,
             current_user=current_user,
         )
 
-    assert exc.value.status_code == 409
-    assert "funeral home" in exc.value.detail.lower()
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_family_admin_cannot_create_default():
+async def test_family_admin_cannot_create_default(monkeypatch):
     db = SimpleNamespace()
     current_user = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
+    service = SimpleNamespace(can_manage_owner=AsyncMock(return_value=False))
+
+    monkeypatch.setattr(
+        default_collections_api, "DefaultGiftCollectionService", lambda _: service
+    )
 
     with pytest.raises(HTTPException) as exc:
         await default_collections_api.create_default_gift_collection(
@@ -355,6 +634,7 @@ async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
     current_user = make_user(UserRole.SUPER_ADMIN)
     created = make_default(created_by=current_user.id)
     service = SimpleNamespace(
+        can_manage_owner=AsyncMock(return_value=True),
         create=AsyncMock(return_value=created),
         get_by_id=AsyncMock(return_value=created),
         deactivate=AsyncMock(return_value=created),
@@ -379,6 +659,10 @@ async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
     )
 
     service.create.assert_awaited_once()
+    assert service.create.await_args.kwargs["owner_user_id"] is None
+    assert (
+        service.create.await_args.kwargs["owner_scope"] == DefaultCollectionScope.ZENDORA
+    )
     service.deactivate.assert_awaited_once_with(created.id)
     assert created_response.created_by == current_user.id
 
@@ -406,7 +690,7 @@ async def test_director_can_create_collection_from_default(monkeypatch):
     user_service = SimpleNamespace(get_by_email=AsyncMock(return_value=family_admin))
     default_service = SimpleNamespace(
         get_by_id=AsyncMock(return_value=default_collection),
-        is_applicable_to_family_admin=AsyncMock(return_value=True),
+        is_applicable_to_user=AsyncMock(return_value=True),
         build_collection_payload=lambda _: {"title": "Template title", "products": []},
     )
     collection_service = SimpleNamespace(

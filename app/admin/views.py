@@ -493,7 +493,8 @@ class DefaultGiftCollectionAdmin(ModelView, model=DefaultGiftCollection):
 
     column_list = [
         DefaultGiftCollection.id, DefaultGiftCollection.name,
-        DefaultGiftCollection.owner_scope, DefaultGiftCollection.funeral_home_id,
+        DefaultGiftCollection.owner_scope, DefaultGiftCollection.owner_user_id,
+        DefaultGiftCollection.funeral_home_id,
         DefaultGiftCollection.is_active, DefaultGiftCollection.created_at
     ]
     column_searchable_list = [DefaultGiftCollection.name, DefaultGiftCollection.description]
@@ -504,7 +505,8 @@ class DefaultGiftCollectionAdmin(ModelView, model=DefaultGiftCollection):
 
     form_columns = [
         DefaultGiftCollection.name, DefaultGiftCollection.description,
-        DefaultGiftCollection.owner_scope, DefaultGiftCollection.funeral_home,
+        DefaultGiftCollection.owner_scope, DefaultGiftCollection.owner,
+        DefaultGiftCollection.funeral_home,
         DefaultGiftCollection.collection_title, DefaultGiftCollection.collection_description,
         DefaultGiftCollection.logo_url, DefaultGiftCollection.header_image_url,
         DefaultGiftCollection.primary_color, DefaultGiftCollection.secondary_color,
@@ -516,6 +518,7 @@ class DefaultGiftCollectionAdmin(ModelView, model=DefaultGiftCollection):
         DefaultGiftCollection.is_active: lambda m, a: format_boolean(m.is_active),
         DefaultGiftCollection.created_at: lambda m, a: format_datetime(m.created_at),
         DefaultGiftCollection.funeral_home_id: lambda m, a: format_uuid(m.funeral_home_id) if m.funeral_home_id else "",
+        DefaultGiftCollection.owner_user_id: lambda m, a: format_uuid(m.owner_user_id) if m.owner_user_id else "Zendora",
     }
 
     form_overrides = {
@@ -540,6 +543,8 @@ class DefaultGiftCollectionAdmin(ModelView, model=DefaultGiftCollection):
         DefaultGiftCollection.name: "Name",
         DefaultGiftCollection.description: "Description",
         DefaultGiftCollection.owner_scope: "Owner Scope",
+        DefaultGiftCollection.owner_user_id: "Owner User ID",
+        DefaultGiftCollection.owner: "Owner",
         DefaultGiftCollection.funeral_home_id: "Funeral Home ID",
         DefaultGiftCollection.funeral_home: "Funeral Home",
         DefaultGiftCollection.collection_title: "Collection Title",

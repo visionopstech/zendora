@@ -175,6 +175,14 @@ class User(Base):
         foreign_keys="DefaultGiftCollection.created_by",
         back_populates="creator"
     )
+
+    # Default gift collections this user owns, inherited by the users below them
+    owned_default_gift_collections: Mapped[List["DefaultGiftCollection"]] = relationship(
+        "DefaultGiftCollection",
+        foreign_keys="DefaultGiftCollection.owner_user_id",
+        back_populates="owner",
+        passive_deletes=True,
+    )
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role})>"

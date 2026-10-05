@@ -11,8 +11,9 @@ from app.models.default_gift_collection import (
     DefaultGiftCollection,
     DefaultGiftCollectionProduct,
 )
+from app.models.funeral_home import FuneralHome
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 
 
 class DefaultGiftCollectionService:
@@ -51,6 +52,7 @@ class DefaultGiftCollectionService:
         self,
         owner_scope: Optional[DefaultCollectionScope] = None,
         funeral_home_ids: Optional[List[UUID]] = None,
+        owner_user_id: Optional[UUID] = None,
         include_zendora: bool = True,
         active_only: bool = True,
         search: Optional[str] = None,
@@ -103,6 +105,9 @@ class DefaultGiftCollectionService:
 
         filters = list(scope_filters)
 
+        if owner_user_id is not None:
+            filters.append(DefaultGiftCollection.owner_user_id == owner_user_id)
+
         if active_only:
             filters.append(DefaultGiftCollection.is_active == True)
 
@@ -134,49 +139,180 @@ class DefaultGiftCollectionService:
         result = await self.db.execute(query)
         return list(result.scalars().all()), total
 
-    async def resolve_for_family_admin(
+    async def get_user(self, user_id: UUID) -> Optional[User]:
+        """Load a user without touching relationships."""
+
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+
+    async def get_main_director_id(self, funeral_home_id: Optional[UUID]) -> Optional[UUID]:
+        """The id of the director a funeral home is registered under."""
+
+        if not funeral_home_id:
+            return None
+
+        result = await self.db.execute(
+            select(FuneralHome.director_id).where(FuneralHome.id == funeral_home_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_upper_hand(self, user: User) -> Optional[User]:
+        """
+        The user one step up the hierarchy, or None when Zendora comes next.
+
+        A family admin reports to their director, falling back to the main
+        director of their funeral home. A non-main director reports to the main
+        director. A main director reports to Zendora.
+        """
+
+        if user.role == UserRole.FAMILY_ADMIN.value:
+            if user.director_id:
+                director = await self.get_user(user.director_id)
+                if director is not None and director.id != user.id:
+                    return director
+
+        if user.role not in {UserRole.FAMILY_ADMIN.value, UserRole.DIRECTOR.value}:
+            return None
+
+        main_director_id = await self.get_main_director_id(user.funeral_home_id)
+        if not main_director_id or main_director_id == user.id:
+            return None
+
+        return await self.get_user(main_director_id)
+
+    async def owner_chain(self, user: User) -> List[Optional[UUID]]:
+        """
+        Owner ids from `user` upward, nearest first. None is the Zendora pool.
+
+        Super admins own the Zendora pool itself, so their chain is only that.
+        """
+
+        if user.role == UserRole.SUPER_ADMIN.value:
+            return [None]
+
+        chain: List[Optional[UUID]] = []
+        seen: set[UUID] = set()
+        current: Optional[User] = user
+
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            chain.append(current.id)
+            current = await self.get_upper_hand(current)
+
+        chain.append(None)
+        return chain
+
+    async def list_owned_by(
+        self,
+        owner_user_id: Optional[UUID],
+        active_only: bool = True,
+        load_products: bool = True,
+    ) -> List[DefaultGiftCollection]:
+        """List the defaults owned by one user, or the Zendora pool for None."""
+
+        if owner_user_id is None:
+            collections, _ = await self.list_collections(
+                owner_scope=DefaultCollectionScope.ZENDORA,
+                active_only=active_only,
+                load_products=load_products,
+            )
+            return collections
+
+        collections, _ = await self.list_collections(
+            owner_scope=DefaultCollectionScope.FUNERAL_HOME,
+            owner_user_id=owner_user_id,
+            active_only=active_only,
+            load_products=load_products,
+        )
+        return collections
+
+    async def resolve_for_user(
         self,
         user: User,
         active_only: bool = True,
         load_products: bool = True,
     ) -> List[DefaultGiftCollection]:
         """
-        Resolve the default collections a family admin may pick from.
+        Resolve the defaults a user sees: their own, or the nearest upper hand's.
 
-        The funeral home's own defaults win; Zendora defaults are the fallback
-        when the funeral home has not created any.
+        The walk stops at the first level in the hierarchy that owns any
+        default, so a user never sees two levels mixed together.
         """
 
-        if user.funeral_home_id:
-            funeral_home_defaults, _ = await self.list_collections(
-                owner_scope=DefaultCollectionScope.FUNERAL_HOME,
-                funeral_home_ids=[user.funeral_home_id],
+        for owner_user_id in await self.owner_chain(user):
+            collections = await self.list_owned_by(
+                owner_user_id,
                 active_only=active_only,
                 load_products=load_products,
             )
-            if funeral_home_defaults:
-                return funeral_home_defaults
+            if collections:
+                return collections
 
-        zendora_defaults, _ = await self.list_collections(
-            owner_scope=DefaultCollectionScope.ZENDORA,
-            active_only=active_only,
-            load_products=load_products,
-        )
-        return zendora_defaults
+        return []
 
-    async def is_applicable_to_family_admin(
+    async def is_applicable_to_user(
         self,
         user: User,
         default_collection: DefaultGiftCollection,
     ) -> bool:
-        """Check whether a family admin may build a collection from this default."""
+        """Check whether a user may build a gift collection from this default."""
 
-        applicable = await self.resolve_for_family_admin(
+        applicable = await self.resolve_for_user(
             user,
             active_only=True,
             load_products=False,
         )
         return any(item.id == default_collection.id for item in applicable)
+
+    async def can_manage_owner(self, actor: User, owner_user_id: Optional[UUID]) -> bool:
+        """
+        Whether `actor` may create or edit defaults owned by `owner_user_id`.
+
+        Only super admins touch the Zendora pool. Directors manage their own
+        defaults and those of the families they are responsible for. Nobody
+        edits the defaults of a user above them.
+        """
+
+        if actor.role == UserRole.SUPER_ADMIN.value:
+            return True
+
+        if owner_user_id is None:
+            return False
+
+        if actor.role != UserRole.DIRECTOR.value:
+            return False
+
+        if owner_user_id == actor.id:
+            return True
+
+        owner = await self.get_user(owner_user_id)
+        if owner is None or owner.role != UserRole.FAMILY_ADMIN.value:
+            return False
+
+        if owner.director_id == actor.id:
+            return True
+
+        main_director_id = await self.get_main_director_id(actor.funeral_home_id)
+        return (
+            main_director_id == actor.id
+            and owner.funeral_home_id is not None
+            and owner.funeral_home_id == actor.funeral_home_id
+        )
+
+    async def can_read(self, actor: User, default_collection: DefaultGiftCollection) -> bool:
+        """Readable when the default is the actor's own, an upper hand's, or managed."""
+
+        if actor.role == UserRole.SUPER_ADMIN.value:
+            return True
+
+        owner_level_id = default_collection.owner_level_id
+        if owner_level_id is None:
+            return default_collection.owner_scope == DefaultCollectionScope.ZENDORA.value
+
+        if owner_level_id in await self.owner_chain(actor):
+            return True
+
+        return await self.can_manage_owner(actor, owner_level_id)
 
     async def _validate_products(self, products: List[dict]) -> None:
         """Ensure all referenced gifts exist and are active."""
@@ -233,6 +369,7 @@ class DefaultGiftCollectionService:
         created_by: UUID,
         name: str,
         owner_scope: DefaultCollectionScope = DefaultCollectionScope.ZENDORA,
+        owner_user_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         description: Optional[str] = None,
         collection_title: Optional[str] = None,
@@ -251,15 +388,23 @@ class DefaultGiftCollectionService:
             owner_scope.value if isinstance(owner_scope, DefaultCollectionScope) else owner_scope
         )
 
-        if scope_value == DefaultCollectionScope.FUNERAL_HOME.value and not funeral_home_id:
-            raise PermissionDenied("Funeral home scoped defaults require a funeral home")
+        if scope_value == DefaultCollectionScope.FUNERAL_HOME.value:
+            if not owner_user_id:
+                raise PermissionDenied("Funeral home scoped defaults require an owner")
+            if funeral_home_id is None:
+                owner = await self.get_user(owner_user_id)
+                if owner is None:
+                    raise NotFoundException("Owner user not found")
+                funeral_home_id = owner.funeral_home_id
         if scope_value == DefaultCollectionScope.ZENDORA.value:
             funeral_home_id = None
+            owner_user_id = None
 
         default_collection = DefaultGiftCollection(
             created_by=created_by,
             name=name,
             owner_scope=scope_value,
+            owner_user_id=owner_user_id,
             funeral_home_id=funeral_home_id,
             description=description,
             collection_title=collection_title,
