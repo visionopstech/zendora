@@ -300,7 +300,11 @@ class UserManagementService:
         if password:
             user.password_hash = hash_password(password)
 
-        if profit_percentage_provided and resulting_role != UserRole.DIRECTOR.value:
+        if (
+            profit_percentage_provided
+            and profit_percentage is not None
+            and resulting_role != UserRole.DIRECTOR.value
+        ):
             raise PermissionDenied("profit_percentage can only be set for DIRECTOR users")
 
         financial_service = FinancialService(self.db)
