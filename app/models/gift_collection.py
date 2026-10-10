@@ -53,6 +53,14 @@ class GiftCollection(Base):
     # Public access
     public_slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     
+    # Total number of visits to the public page
+    visit_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False
+    )
+    
     # Status
     status: Mapped[str] = mapped_column(
         String(50),

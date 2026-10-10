@@ -387,6 +387,7 @@ class GiftCollectionAdmin(ModelView, model=GiftCollection):
         GiftCollection.logo_url, GiftCollection.header_image_url,
         GiftCollection.primary_color, GiftCollection.secondary_color,
         GiftCollection.delivery_address, GiftCollection.products,
+        GiftCollection.visit_count,
         GiftCollection.created_at, GiftCollection.updated_at, GiftCollection.published_at
     ]
 
@@ -458,6 +459,7 @@ class GiftCollectionAdmin(ModelView, model=GiftCollection):
         GiftCollection.primary_color: "Primary Color",
         GiftCollection.secondary_color: "Secondary Color",
         GiftCollection.delivery_address: "Delivery Address",
+        GiftCollection.visit_count: "Visit Count",
         GiftCollection.created_at: "Created At",
         GiftCollection.updated_at: "Updated At",
         GiftCollection.published_at: "Published At",

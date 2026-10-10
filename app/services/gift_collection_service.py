@@ -2,7 +2,7 @@ import secrets
 import string
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional, List, Any
@@ -87,6 +87,14 @@ class GiftCollectionService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
     
+    async def increment_visit_count(self, gift_collection_id: UUID) -> None:
+        """Atomically count one more visit to the public page."""
+        await self.db.execute(
+            update(GiftCollection)
+            .where(GiftCollection.id == gift_collection_id)
+            .values(visit_count=GiftCollection.visit_count + 1)
+        )
+
     async def get_published_by_family_admin(self, family_admin_id: UUID) -> Optional[GiftCollection]:
         """Get the published collection for a family admin."""
         result = await self.db.execute(

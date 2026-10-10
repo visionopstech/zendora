@@ -37,6 +37,11 @@ async def get_public_gift_collection(
             detail="Gift collection not found",
         )
 
+    # Count the visit so the family admin, director and super admin can see
+    # how many people viewed the public page.
+    await collection_service.increment_visit_count(collection.id)
+    await db.commit()
+
     customization = GiftCollectionCustomization(
         logo_url=collection.logo_url,
         header_image_url=collection.header_image_url,

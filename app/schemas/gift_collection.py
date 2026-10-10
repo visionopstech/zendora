@@ -140,6 +140,7 @@ class GiftCollectionResponse(GiftCollectionBase):
     source_default_collection_id: Optional[UUID] = None
     public_slug: str
     status: GiftCollectionStatus
+    visit_count: int = 0
     created_at: datetime
     published_at: Optional[datetime] = None
     qr_code_url: Optional[str] = None
