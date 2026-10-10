@@ -56,7 +56,7 @@ class GiftCollection(Base):
     # Status
     status: Mapped[str] = mapped_column(
         String(50),
-        default=GiftCollectionStatus.DRAFT.value,
+        default=GiftCollectionStatus.PUBLISHED.value,
         nullable=False,
         index=True
     )
