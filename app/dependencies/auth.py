@@ -5,7 +5,7 @@ from uuid import UUID
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import PASSWORD_RESET_TOKEN_USE, decode_access_token
 from app.core.exceptions import ConflictError, UnauthorizedError, PermissionDenied
 from app.models.user import User, UserRole
 from app.services.user_service import UserService
@@ -34,7 +34,7 @@ async def get_current_user(
     token = credentials.credentials
     payload = decode_access_token(token)
     
-    if not payload:
+    if not payload or payload.get("token_use") == PASSWORD_RESET_TOKEN_USE:
         raise UnauthorizedError("Invalid authentication token")
     
     user_id = payload.get("sub")

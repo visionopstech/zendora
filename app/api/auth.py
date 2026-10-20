@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.schemas.user import (
     RegistrableRole,
     RegistrableRoleOption,
@@ -11,6 +12,9 @@ from app.schemas.user import (
     UserLogin,
     TokenResponse,
     UserResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    AuthStatusResponse,
     MagicLinkRequest,
     MagicLinkVerify,
     ThirdPartyLoginRequest,
@@ -125,6 +129,76 @@ async def login(
             access_token=token,
             token_type="bearer",
             user=UserResponse.model_validate(user)
+        )
+    except UnauthorizedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+
+
+FORGOT_PASSWORD_MESSAGE = (
+    "If the email exists, a password reset link has been sent"
+)
+
+
+@router.post(
+    "/forgot-password",
+    response_model=AuthStatusResponse,
+    response_model_exclude_none=True,
+)
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Request a password reset email.
+
+    Always returns the same success message so callers cannot probe whether
+    an email is registered. The reset link is emailed when the account exists
+    and is active.
+    """
+    auth_service = AuthService(db)
+    user_service = UserService(db)
+
+    user = await user_service.get_by_email(request.email)
+    token = None
+    if user and user.is_active:
+        token = auth_service.generate_password_reset_token(user)
+        from app.services.email_service import EmailService
+
+        display_name = user.display_name or "there"
+        reset_url = f"{settings.frontend_url}/reset-password?token={token}"
+        email_service = EmailService()
+        background_tasks.add_task(
+            email_service.send_password_reset_email,
+            user.email,
+            display_name,
+            reset_url,
+        )
+
+    response = AuthStatusResponse(message=FORGOT_PASSWORD_MESSAGE)
+    if token and not settings.is_production:
+        response.debug_token = token
+    return response
+
+
+@router.post("/reset-password", response_model=AuthStatusResponse)
+async def reset_password(
+    request: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Set a new password using a token from the reset email.
+    """
+    auth_service = AuthService(db)
+
+    try:
+        await auth_service.reset_password(request.token, request.password)
+        await db.commit()
+        return AuthStatusResponse(
+            message="Password has been reset successfully",
         )
     except UnauthorizedError as e:
         raise HTTPException(

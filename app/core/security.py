@@ -1,9 +1,15 @@
 from datetime import datetime, timedelta
+from hashlib import sha256
 from typing import Optional
+from uuid import UUID
+
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
+
+PASSWORD_RESET_TOKEN_USE = "password_reset"
+PASSWORD_RESET_TOKEN_EXPIRE_HOURS = 1
 
 
 # Password hashing context
@@ -88,3 +94,35 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def password_reset_fingerprint(password_hash: Optional[str]) -> str:
+    """Short hash of the current password so a reset token dies after it is used."""
+    return sha256((password_hash or "").encode("utf-8")).hexdigest()[:16]
+
+
+def create_password_reset_token(
+    user_id: UUID,
+    email: str,
+    password_hash: Optional[str],
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a short-lived JWT used only for password reset."""
+    return create_access_token(
+        {
+            "sub": str(user_id),
+            "email": email,
+            "token_use": PASSWORD_RESET_TOKEN_USE,
+            "pwd": password_reset_fingerprint(password_hash),
+        },
+        expires_delta=expires_delta
+        or timedelta(hours=PASSWORD_RESET_TOKEN_EXPIRE_HOURS),
+    )
+
+
+def decode_password_reset_token(token: str) -> Optional[dict]:
+    """Decode a password-reset JWT. Returns None if invalid, expired, or wrong type."""
+    payload = decode_access_token(token)
+    if not payload or payload.get("token_use") != PASSWORD_RESET_TOKEN_USE:
+        return None
+    return payload

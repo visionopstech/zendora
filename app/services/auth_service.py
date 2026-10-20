@@ -1,10 +1,17 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
+from hmac import compare_digest
+from uuid import UUID
 import secrets
 from typing import Optional
 
 from app.models.user import User, UserRole
-from app.core.security import create_access_token
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    decode_password_reset_token,
+    password_reset_fingerprint,
+)
 from app.core.exceptions import UnauthorizedError, ConflictError, PermissionDenied
 from app.services.user_service import UserService
 
@@ -121,6 +128,43 @@ class AuthService:
         
         return user, token
     
+    def generate_password_reset_token(self, user: User) -> str:
+        """Create a short-lived password-reset token bound to the current password."""
+        return create_password_reset_token(
+            user_id=user.id,
+            email=user.email,
+            password_hash=user.password_hash,
+        )
+
+    async def reset_password(self, token: str, new_password: str) -> User:
+        """
+        Verify a password-reset token and set a new password.
+
+        The token is bound to the current password hash, so it cannot be reused
+        after a successful reset.
+        """
+        payload = decode_password_reset_token(token)
+        if not payload:
+            raise UnauthorizedError("Invalid or expired password reset token")
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise UnauthorizedError("Invalid or expired password reset token")
+
+        try:
+            user = await self.user_service.get_by_id(UUID(user_id))
+        except (TypeError, ValueError):
+            raise UnauthorizedError("Invalid or expired password reset token")
+
+        if not user or not user.is_active:
+            raise UnauthorizedError("Invalid or expired password reset token")
+
+        expected = password_reset_fingerprint(user.password_hash)
+        if not compare_digest(expected, payload.get("pwd") or ""):
+            raise UnauthorizedError("Invalid or expired password reset token")
+
+        return await self.user_service.update_password(user.id, new_password)
+
     async def cleanup_expired_tokens(self):
         """Remove expired magic link tokens."""
         now = datetime.utcnow()

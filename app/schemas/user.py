@@ -87,6 +87,24 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Schema for requesting a password reset email."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schema for setting a new password with a reset token."""
+    token: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+
+
+class AuthStatusResponse(BaseModel):
+    """Generic success payload for auth side-effects."""
+    message: str
+    status: str = "success"
+    debug_token: Optional[str] = None
+
+
 class MagicLinkRequest(BaseModel):
     """Schema for requesting a magic link."""
     email: EmailStr

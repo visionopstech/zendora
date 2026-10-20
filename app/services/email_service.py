@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.security import PASSWORD_RESET_TOKEN_EXPIRE_HOURS
 from app.core.database import AsyncSessionLocal
 from app.models.email_template import EmailTemplateSlug
 from app.models.gift_collection import GiftCollection
@@ -206,6 +207,25 @@ class EmailService:
         return await self.send_email(
             to_email=family_admin.email,
             subject="Welcome to Zendora - Your Family Admin Credentials",
+            html_content=html_content,
+        )
+
+    async def send_password_reset_email(
+        self,
+        to_email: str,
+        user_name: str,
+        reset_url: str,
+    ) -> bool:
+        """Send a password-reset link to a user who requested it."""
+        template = jinja_env.get_template("password_reset.html")
+        html_content = template.render(
+            user_name=user_name or "there",
+            reset_url=reset_url,
+            expire_hours=PASSWORD_RESET_TOKEN_EXPIRE_HOURS,
+        )
+        return await self.send_email(
+            to_email=to_email,
+            subject="Reset your Zendora password",
             html_content=html_content,
         )
 
