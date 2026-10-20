@@ -113,6 +113,8 @@ class ProductResponse(ProductBase):
     created_at: datetime
     images: List[ProductImageResponse] = Field(default_factory=list)
     primary_image_url: Optional[str] = None
+    funeral_home_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
     
     class Config:
         from_attributes = True
@@ -121,6 +123,7 @@ class ProductResponse(ProductBase):
 class ProductWithVendors(ProductResponse):
     """Gift response with vendor information."""
     vendor_ids: List[UUID] = Field(default_factory=list)
+    can_edit: bool = False
 
 
 class AssociateVendorsRequest(BaseModel):

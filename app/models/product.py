@@ -43,6 +43,16 @@ class Product(Base):
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    funeral_home_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("funeral_homes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -93,6 +103,16 @@ class Product(Base):
         back_populates="product",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+    funeral_home: Mapped[Optional["FuneralHome"]] = relationship(
+        "FuneralHome",
+        back_populates="products",
+    )
+    creator: Mapped[Optional["User"]] = relationship(
+        "User",
+        foreign_keys=[created_by],
+        back_populates="created_products",
     )
     
     @property

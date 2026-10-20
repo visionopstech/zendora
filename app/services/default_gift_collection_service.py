@@ -14,6 +14,7 @@ from app.models.default_gift_collection import (
 from app.models.funeral_home import FuneralHome
 from app.models.product import Product
 from app.models.user import User, UserRole
+from app.services.product_service import ProductService
 
 
 class DefaultGiftCollectionService:
@@ -314,8 +315,14 @@ class DefaultGiftCollectionService:
 
         return await self.can_manage_owner(actor, owner_level_id)
 
-    async def _validate_products(self, products: List[dict]) -> None:
-        """Ensure all referenced gifts exist and are active."""
+    async def _validate_products(
+        self,
+        products: List[dict],
+        funeral_home_id: Optional[UUID] = None,
+        *,
+        global_only: bool = False,
+    ) -> None:
+        """Ensure all referenced gifts exist, are active, and are in catalog scope."""
 
         if not products:
             return
@@ -331,6 +338,14 @@ class DefaultGiftCollectionService:
 
         if len(existing_products) != len(set(product_ids)):
             raise NotFoundException("One or more gifts not found or inactive")
+
+        for product in existing_products:
+            if not ProductService.is_available_to_funeral_home(
+                product,
+                funeral_home_id,
+                global_only=global_only,
+            ):
+                raise NotFoundException("One or more gifts not found or inactive")
 
     async def _replace_products(
         self,
@@ -351,7 +366,14 @@ class DefaultGiftCollectionService:
             await self.db.flush()
             return
 
-        await self._validate_products(products)
+        global_only = (
+            default_collection.owner_scope == DefaultCollectionScope.ZENDORA.value
+        )
+        await self._validate_products(
+            products,
+            funeral_home_id=default_collection.funeral_home_id,
+            global_only=global_only,
+        )
 
         for product in products:
             self.db.add(

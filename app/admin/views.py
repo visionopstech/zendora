@@ -256,7 +256,7 @@ class ProductAdmin(ModelView, model=Product):
 
     column_list = [
         Product.id, Product.name, Product.base_price, Product.price,
-        Product.is_active, Product.created_at
+        Product.funeral_home_id, Product.is_active, Product.created_at
     ]
     column_searchable_list = [Product.name, Product.description]
     column_sortable_list = [Product.name, Product.price, Product.is_active, Product.created_at]
@@ -264,7 +264,7 @@ class ProductAdmin(ModelView, model=Product):
 
     column_details_list = [
         Product.id, Product.name, Product.description, Product.details,
-        Product.base_price, Product.price,
+        Product.base_price, Product.price, Product.funeral_home_id, Product.created_by,
         Product.images, Product.is_active, Product.vendor_associations,
         Product.created_at, Product.updated_at
     ]
@@ -308,6 +308,8 @@ class ProductAdmin(ModelView, model=Product):
         Product.base_price: "Base Price",
         Product.price: "Retail Price",
         Product.images: "Gallery",
+        Product.funeral_home_id: "Funeral Home",
+        Product.created_by: "Created By",
         Product.is_active: "Active",
         Product.created_at: "Created At",
         Product.updated_at: "Updated At",

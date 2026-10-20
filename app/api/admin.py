@@ -178,6 +178,7 @@ async def get_product(
     
     response_data = ProductResponse.model_validate(product).model_dump()
     response_data["vendor_ids"] = vendor_ids
+    response_data["can_edit"] = True
     
     return ProductWithVendors(**response_data)
 
@@ -241,6 +242,7 @@ async def associate_product_vendors(
         
         response_data = ProductResponse.model_validate(product).model_dump()
         response_data["vendor_ids"] = vendor_ids
+        response_data["can_edit"] = True
         
         return ProductWithVendors(**response_data)
     except NotFoundException as e:

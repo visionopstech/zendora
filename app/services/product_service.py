@@ -1,13 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional, List
 from decimal import Decimal
 
 from app.models.product import Product, ProductImage, ProductVendor
+from app.models.user import User, UserRole
 from app.models.vendor import Vendor
-from app.core.exceptions import NotFoundException, ValidationError
+from app.core.exceptions import NotFoundException, PermissionDenied, ValidationError
 
 
 class ProductService:
@@ -19,6 +20,96 @@ class ProductService:
     def _validate_prices(self, base_price: Decimal, price: Decimal) -> None:
         if price < base_price:
             raise ValidationError("price must be greater than or equal to base_price")
+
+    @staticmethod
+    def is_available_to_funeral_home(
+        product: Product,
+        funeral_home_id: Optional[UUID],
+        *,
+        global_only: bool = False,
+    ) -> bool:
+        """Whether a gift may be attached to a collection for this funeral home."""
+        if product.funeral_home_id is None:
+            return True
+        if global_only:
+            return False
+        return (
+            funeral_home_id is not None
+            and product.funeral_home_id == funeral_home_id
+        )
+
+    def can_read(self, actor: User, product: Product) -> bool:
+        """Whether the caller may see this gift."""
+        if actor.role == UserRole.SUPER_ADMIN.value:
+            return True
+        if actor.role == UserRole.VENDOR.value:
+            if not actor.vendor_id:
+                return False
+            return any(
+                association.vendor_id == actor.vendor_id
+                for association in product.vendor_associations
+            )
+        if actor.role not in {UserRole.DIRECTOR.value, UserRole.FAMILY_ADMIN.value}:
+            return False
+        if product.funeral_home_id is None:
+            return True
+        return (
+            actor.funeral_home_id is not None
+            and product.funeral_home_id == actor.funeral_home_id
+        )
+
+    def can_edit(self, actor: User, product: Product) -> bool:
+        """Whether the caller may update or delete this gift."""
+        if actor.role == UserRole.SUPER_ADMIN.value:
+            return True
+        if actor.role == UserRole.VENDOR.value:
+            if not actor.vendor_id:
+                return False
+            return any(
+                association.vendor_id == actor.vendor_id
+                for association in product.vendor_associations
+            )
+        if actor.role != UserRole.DIRECTOR.value:
+            return False
+        return (
+            product.funeral_home_id is not None
+            and actor.funeral_home_id is not None
+            and product.funeral_home_id == actor.funeral_home_id
+        )
+
+    def resolve_create_scope(self, actor: User) -> Optional[UUID]:
+        """Funeral home to stamp on create. Super admin and vendor → global."""
+        if actor.role in {UserRole.SUPER_ADMIN.value, UserRole.VENDOR.value}:
+            return None
+        if actor.role == UserRole.DIRECTOR.value:
+            if not actor.funeral_home_id:
+                raise PermissionDenied(
+                    "Directors must belong to a funeral home to create gifts"
+                )
+            return actor.funeral_home_id
+        raise PermissionDenied(
+            "This action requires SUPER_ADMIN, DIRECTOR, or VENDOR role"
+        )
+
+    def _visibility_filters(self, actor: Optional[User], vendor_id: Optional[UUID]):
+        """SQL filters for the caller's catalog. Super admin is unscoped."""
+        if vendor_id is not None:
+            vendor_product_ids = select(ProductVendor.product_id).where(
+                ProductVendor.vendor_id == vendor_id
+            )
+            return [Product.id.in_(vendor_product_ids)]
+        if actor is None or actor.role == UserRole.SUPER_ADMIN.value:
+            return []
+        if actor.role in {UserRole.DIRECTOR.value, UserRole.FAMILY_ADMIN.value}:
+            if actor.funeral_home_id:
+                return [
+                    or_(
+                        Product.funeral_home_id.is_(None),
+                        Product.funeral_home_id == actor.funeral_home_id,
+                    )
+                ]
+            return [Product.funeral_home_id.is_(None)]
+        return []
 
     def _normalize_images(self, images: Optional[List[dict]]) -> List[dict]:
         """
@@ -79,19 +170,18 @@ class ProductService:
         self,
         include_inactive: bool = False,
         load_vendors: bool = False,
-        vendor_id: Optional[UUID] = None
+        vendor_id: Optional[UUID] = None,
+        actor: Optional[User] = None,
     ) -> List[Product]:
-        """Get all gifts, optionally filtered by vendor."""
+        """Get gifts visible to the caller, optionally filtered by vendor."""
         query = select(Product)
         
         if load_vendors:
             query = query.options(selectinload(Product.vendor_associations))
-        
-        if vendor_id is not None:
-            vendor_product_ids = select(ProductVendor.product_id).where(
-                ProductVendor.vendor_id == vendor_id
-            )
-            query = query.where(Product.id.in_(vendor_product_ids))
+
+        filters = self._visibility_filters(actor, vendor_id)
+        if filters:
+            query = query.where(*filters)
         
         if not include_inactive:
             query = query.where(Product.is_active == True)
@@ -118,7 +208,9 @@ class ProductService:
         price: Decimal,
         description: Optional[str] = None,
         details: Optional[List[str]] = None,
-        images: Optional[List[dict]] = None
+        images: Optional[List[dict]] = None,
+        funeral_home_id: Optional[UUID] = None,
+        created_by: Optional[UUID] = None,
     ) -> Product:
         """Create a new gift with its gallery."""
         self._validate_prices(base_price, price)
@@ -128,7 +220,9 @@ class ProductService:
             details=details or [],
             base_price=base_price,
             price=price,
-            is_active=True
+            is_active=True,
+            funeral_home_id=funeral_home_id,
+            created_by=created_by,
         )
         
         self.db.add(product)
@@ -149,7 +243,8 @@ class ProductService:
         vendor_ids: List[UUID],
         description: Optional[str] = None,
         details: Optional[List[str]] = None,
-        images: Optional[List[dict]] = None
+        images: Optional[List[dict]] = None,
+        created_by: Optional[UUID] = None,
     ) -> Product:
         """Create a new gift and associate it with vendors in one operation."""
         product = await self.create(
@@ -158,7 +253,8 @@ class ProductService:
             price=price,
             description=description,
             details=details,
-            images=images
+            images=images,
+            created_by=created_by,
         )
         
         if vendor_ids:

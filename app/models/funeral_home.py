@@ -74,6 +74,11 @@ class FuneralHome(Base):
         back_populates="funeral_home",
     )
 
+    products: Mapped[List["Product"]] = relationship(
+        "Product",
+        back_populates="funeral_home",
+    )
+
     def __repr__(self) -> str:
         return f"<FuneralHome(id={self.id}, name={self.name}, director_id={self.director_id})>"
 

@@ -15,6 +15,7 @@ from app.models.gift_collection import (
 from app.models.product import Product
 from app.models.user import User
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
+from app.services.product_service import ProductService
 
 MAX_COLLECTIONS_PER_DIRECTOR = 5
 MAX_PUBLISHED_PER_DIRECTOR = 3
@@ -371,7 +372,9 @@ class GiftCollectionService:
             select(Product).where(Product.id == product_id, Product.is_active == True)
         )
         product = result.scalar_one_or_none()
-        if not product:
+        if not product or not ProductService.is_available_to_funeral_home(
+            product, collection.funeral_home_id
+        ):
             raise NotFoundException("Gift not found or inactive")
         
         result = await self.db.execute(
@@ -451,7 +454,7 @@ class GiftCollectionService:
         )
         
         if products:
-            await self._validate_products(products)
+            await self._validate_products(products, funeral_home_id=funeral_home_id)
             
             for product_data in products:
                 self.db.add(
@@ -467,8 +470,14 @@ class GiftCollectionService:
         
         return collection
 
-    async def _validate_products(self, products: List[dict]) -> None:
-        """Ensure every referenced gift exists and is active."""
+    async def _validate_products(
+        self,
+        products: List[dict],
+        funeral_home_id: Optional[UUID] = None,
+        *,
+        global_only: bool = False,
+    ) -> None:
+        """Ensure every referenced gift exists, is active, and is in catalog scope."""
         product_ids = [product["product_id"] for product in products]
         result = await self.db.execute(
             select(Product).where(
@@ -480,6 +489,14 @@ class GiftCollectionService:
         
         if len(existing_products) != len(set(product_ids)):
             raise NotFoundException("One or more gifts not found or inactive")
+
+        for product in existing_products:
+            if not ProductService.is_available_to_funeral_home(
+                product,
+                funeral_home_id,
+                global_only=global_only,
+            ):
+                raise NotFoundException("One or more gifts not found or inactive")
 
     async def _create_from_payload(
         self,
@@ -557,7 +574,9 @@ class GiftCollectionService:
             await self.db.delete(association)
         
         if products:
-            await self._validate_products(products)
+            await self._validate_products(
+                products, funeral_home_id=collection.funeral_home_id
+            )
             
             for product_data in products:
                 self.db.add(
