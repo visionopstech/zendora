@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "banner_presets",
-        sa.Column("id", sa.UUID(), server_default="gen_random_uuid()", nullable=False),
+        sa.Column("id", sa.UUID(), server_default=sa.text("gen_random_uuid()"), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("image_url", sa.String(length=500), nullable=False),
         sa.Column("owner_scope", sa.String(length=50), nullable=False),
