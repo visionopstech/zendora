@@ -14,6 +14,7 @@ from app.models.default_gift_collection import (
     DefaultGiftCollection,
     DefaultGiftCollectionProduct,
 )
+from app.models.banner_preset import BannerPreset, BannerPresetScope
 from app.models.order import Order, OrderProduct, OrderStatus
 from app.admin.formatters import (
     format_uuid, format_datetime, format_price,
@@ -558,6 +559,79 @@ class DefaultGiftCollectionAdmin(ModelView, model=DefaultGiftCollection):
     can_create = False
     can_edit = False
     can_delete = False
+    can_view_details = True
+    can_export = True
+
+    page_size = 50
+    page_size_options = [25, 50, 100, 200]
+
+
+class BannerPresetAdmin(ModelView, model=BannerPreset):
+    """Admin view for default collection banners."""
+
+    name = "Banner Preset"
+    name_plural = "Banner Presets"
+    icon = "fa-solid fa-image"
+
+    column_list = [
+        BannerPreset.id, BannerPreset.name, BannerPreset.owner_scope,
+        BannerPreset.funeral_home_id, BannerPreset.is_active,
+        BannerPreset.sort_order, BannerPreset.created_at,
+    ]
+    column_searchable_list = [BannerPreset.name, BannerPreset.image_url]
+    column_sortable_list = [
+        BannerPreset.name, BannerPreset.owner_scope,
+        BannerPreset.sort_order, BannerPreset.created_at,
+    ]
+    column_default_sort = [(BannerPreset.sort_order, False), (BannerPreset.created_at, True)]
+    column_filters = [BannerPreset.owner_scope, BannerPreset.is_active]
+
+    form_columns = [
+        BannerPreset.name, BannerPreset.image_url, BannerPreset.owner_scope,
+        BannerPreset.funeral_home, BannerPreset.sort_order, BannerPreset.is_active,
+    ]
+
+    column_formatters = {
+        BannerPreset.id: lambda m, a: format_uuid(m.id),
+        BannerPreset.is_active: lambda m, a: format_boolean(m.is_active),
+        BannerPreset.created_at: lambda m, a: format_datetime(m.created_at),
+        BannerPreset.funeral_home_id: lambda m, a: format_uuid(m.funeral_home_id) if m.funeral_home_id else "",
+    }
+
+    form_overrides = {
+        "owner_scope": SelectField,
+    }
+
+    form_args = {
+        "owner_scope": {
+            "choices": [(scope.value, scope.value) for scope in BannerPresetScope],
+            "validators": [validators.DataRequired()],
+        },
+        "name": {
+            "validators": [validators.DataRequired(), validators.Length(max=255)],
+        },
+        "image_url": {
+            "validators": [validators.DataRequired(), validators.Length(max=500)],
+        },
+    }
+
+    column_labels = {
+        BannerPreset.id: "ID",
+        BannerPreset.name: "Name",
+        BannerPreset.image_url: "Image URL",
+        BannerPreset.owner_scope: "Owner Scope",
+        BannerPreset.funeral_home_id: "Funeral Home ID",
+        BannerPreset.funeral_home: "Funeral Home",
+        BannerPreset.created_by: "Created By",
+        BannerPreset.sort_order: "Sort Order",
+        BannerPreset.is_active: "Active",
+        BannerPreset.created_at: "Created At",
+        BannerPreset.updated_at: "Updated At",
+    }
+
+    can_create = True
+    can_edit = True
+    can_delete = True
     can_view_details = True
     can_export = True
 

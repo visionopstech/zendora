@@ -176,6 +176,12 @@ class User(Base):
         back_populates="creator"
     )
 
+    created_banner_presets: Mapped[List["BannerPreset"]] = relationship(
+        "BannerPreset",
+        foreign_keys="BannerPreset.created_by",
+        back_populates="creator",
+    )
+
     # Default gift collections this user owns, inherited by the users below them
     owned_default_gift_collections: Mapped[List["DefaultGiftCollection"]] = relationship(
         "DefaultGiftCollection",

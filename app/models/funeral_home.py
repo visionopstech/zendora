@@ -64,6 +64,11 @@ class FuneralHome(Base):
         back_populates="funeral_home",
     )
 
+    banner_presets: Mapped[List["BannerPreset"]] = relationship(
+        "BannerPreset",
+        back_populates="funeral_home",
+    )
+
     gift_collections: Mapped[List["GiftCollection"]] = relationship(
         "GiftCollection",
         back_populates="funeral_home",

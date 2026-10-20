@@ -197,6 +197,7 @@ from app.api import (
     directors,
     files,
     email_templates,
+    banner_presets,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
@@ -213,6 +214,7 @@ app.include_router(director_settings.router, prefix="/api", tags=["Director - Se
 app.include_router(directors.router, prefix="/api", tags=["Directors"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
 app.include_router(email_templates.router, prefix="/api/email-templates", tags=["Email Templates"])
+app.include_router(banner_presets.router, prefix="/api/banner-presets", tags=["Banner Presets"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin - Vendors & Products"])
 app.include_router(wishlist_public.router, prefix="/w", tags=["Public Gift Collection"])
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])

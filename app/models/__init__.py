@@ -25,6 +25,7 @@ from app.models.finance import (
 from app.models.director_settings import DirectorSettings
 from app.models.gift_collection_settings import GiftCollectionSettings
 from app.models.email_template import EmailTemplate, EmailTemplateSlug
+from app.models.banner_preset import BannerPreset, BannerPresetScope
 
 __all__ = [
     "User",
@@ -53,4 +54,6 @@ __all__ = [
     "GiftCollectionSettings",
     "EmailTemplate",
     "EmailTemplateSlug",
+    "BannerPreset",
+    "BannerPresetScope",
 ]

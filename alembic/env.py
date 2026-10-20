@@ -30,6 +30,7 @@ from app.models import (  # noqa: F401
     DirectorSettings,
     GiftCollectionSettings,
     EmailTemplate,
+    BannerPreset,
 )
 
 # this is the Alembic Config object

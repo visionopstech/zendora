@@ -15,6 +15,7 @@ from app.admin.views import (
     GiftCollectionProductAdmin,
     DefaultGiftCollectionProductAdmin,
     OrderProductAdmin,
+    BannerPresetAdmin,
 )
 from app.core.config import settings
 
@@ -55,6 +56,7 @@ def setup_admin(app, engine):
     admin.add_view(GiftCollectionProductAdmin)
     admin.add_view(DefaultGiftCollectionProductAdmin)
     admin.add_view(OrderProductAdmin)
+    admin.add_view(BannerPresetAdmin)
     
     return admin
 
