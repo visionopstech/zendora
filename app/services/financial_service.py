@@ -11,19 +11,27 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundException, ValidationError
 from app.models.finance import (
-    DirectorCommission,
     OrderCommission,
     Wallet,
     WalletTransaction,
     WalletTransactionType,
     WalletType,
 )
+from app.models.funeral_home import FuneralHome
 from app.models.order import Order
 from app.models.product import Product
 
 
 MONEY_QUANTUM = Decimal("0.01")
 PERCENT_QUANTUM = Decimal("0.01")
+
+
+def normalize_profit_percentage(amount: Decimal) -> Decimal:
+    """Quantize a commission rate and reject values outside 0–100."""
+    normalized = Decimal(amount).quantize(PERCENT_QUANTUM, rounding=ROUND_HALF_UP)
+    if normalized < 0 or normalized > 100:
+        raise ValidationError("profit_percentage must be between 0 and 100")
+    return normalized
 
 
 class FinancialService:
@@ -38,47 +46,18 @@ class FinancialService:
     def _quantize_percent(self, amount: Decimal) -> Decimal:
         return Decimal(amount).quantize(PERCENT_QUANTUM, rounding=ROUND_HALF_UP)
 
-    async def get_director_commission(self, director_id: UUID) -> Optional[DirectorCommission]:
-        result = await self.db.execute(
-            select(DirectorCommission).where(DirectorCommission.director_id == director_id)
-        )
-        return result.scalar_one_or_none()
-
-    async def upsert_director_commission(
-        self,
-        director_id: UUID,
-        profit_percentage: Optional[Decimal],
-    ) -> Optional[DirectorCommission]:
-        if profit_percentage is None:
-            commission = await self.get_director_commission(director_id)
-            if commission:
-                await self.db.delete(commission)
-                await self.db.flush()
-            return None
-
-        normalized_percentage = self._quantize_percent(profit_percentage)
-        if normalized_percentage < 0 or normalized_percentage > 100:
-            raise ValidationError("profit_percentage must be between 0 and 100")
-
-        commission = await self.get_director_commission(director_id)
-        if commission:
-            commission.profit_percentage = normalized_percentage
-        else:
-            commission = DirectorCommission(
-                director_id=director_id,
-                profit_percentage=normalized_percentage,
-            )
-            self.db.add(commission)
-
-        await self.db.flush()
-        await self.db.refresh(commission)
-        return commission
-
-    async def get_director_profit_percentage(self, director_id: UUID) -> Decimal:
-        commission = await self.get_director_commission(director_id)
-        if not commission:
+    async def get_funeral_home_profit_percentage(
+        self, funeral_home_id: Optional[UUID]
+    ) -> Decimal:
+        if not funeral_home_id:
             return Decimal("0.00")
-        return self._quantize_percent(commission.profit_percentage)
+        result = await self.db.execute(
+            select(FuneralHome.profit_percentage).where(FuneralHome.id == funeral_home_id)
+        )
+        percentage = result.scalar_one_or_none()
+        if percentage is None:
+            return Decimal("0.00")
+        return self._quantize_percent(percentage)
 
     async def calculate_order_commission(
         self,
@@ -116,11 +95,9 @@ class FinancialService:
         director_id: Optional[UUID],
         products: List[Product],
         quantities: dict[UUID, int],
+        funeral_home_id: Optional[UUID] = None,
     ) -> OrderCommission:
-        if director_id:
-            profit_percentage = await self.get_director_profit_percentage(director_id)
-        else:
-            profit_percentage = Decimal("0.00")
+        profit_percentage = await self.get_funeral_home_profit_percentage(funeral_home_id)
         commission_data = await self.calculate_order_commission(
             products=products,
             quantities=quantities,

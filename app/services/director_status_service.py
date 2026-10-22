@@ -26,7 +26,6 @@ class DirectorStatusService:
             .options(
                 selectinload(User.funeral_home),
                 selectinload(User.directed_funeral_home),
-                selectinload(User.director_commission),
             )
             .where(User.id == target_user_id)
         )

@@ -637,18 +637,11 @@ async def test_family_admin_can_be_created_without_director():
 
 
 @pytest.mark.asyncio
-async def test_family_admin_update_can_clear_director_id(monkeypatch):
+async def test_family_admin_update_can_clear_director_id():
     family = make_user(UserRole.FAMILY_ADMIN, director_id=uuid4())
     service = UserManagementService(AsyncMock())
     service.get_by_id = AsyncMock(return_value=family)
     service.db.flush = AsyncMock()
-    monkeypatch.setattr(
-        "app.services.user_management_service.FinancialService",
-        lambda _db: SimpleNamespace(
-            get_director_commission=AsyncMock(return_value=None),
-            upsert_director_commission=AsyncMock(),
-        ),
-    )
 
     user = await service.update(
         user_id=family.id,

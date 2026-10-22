@@ -15,7 +15,6 @@ from app.models.default_gift_collection import (
 )
 from app.models.order import Order, OrderProduct, OrderStatus
 from app.models.finance import (
-    DirectorCommission,
     Wallet,
     WalletType,
     WalletTransaction,
@@ -44,7 +43,6 @@ __all__ = [
     "Order",
     "OrderProduct",
     "OrderStatus",
-    "DirectorCommission",
     "Wallet",
     "WalletType",
     "WalletTransaction",

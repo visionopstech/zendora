@@ -1,5 +1,4 @@
 import os
-from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -14,7 +13,6 @@ os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
-from app.core.exceptions import PermissionDenied
 from app.core.security import hash_password, verify_password
 from app.models.user import UserRole
 from app.services.user_management_service import UserManagementService
@@ -48,29 +46,13 @@ def make_service(user):
 
 
 @pytest.mark.asyncio
-async def test_password_update_accepts_null_profit_percentage_for_family_admin():
-    """A full-object PUT sends profit_percentage: null; that must not block the update."""
+async def test_password_update_hashes_new_password():
     family_admin = make_user(UserRole.FAMILY_ADMIN)
     service = make_service(family_admin)
 
     await service.update(
         user_id=family_admin.id,
         password="new-password",
-        profit_percentage=None,
-        profit_percentage_provided=True,
     )
 
     assert verify_password("new-password", family_admin.password_hash)
-
-
-@pytest.mark.asyncio
-async def test_profit_percentage_value_still_rejected_for_family_admin():
-    family_admin = make_user(UserRole.FAMILY_ADMIN)
-    service = make_service(family_admin)
-
-    with pytest.raises(PermissionDenied):
-        await service.update(
-            user_id=family_admin.id,
-            profit_percentage=Decimal("10"),
-            profit_percentage_provided=True,
-        )

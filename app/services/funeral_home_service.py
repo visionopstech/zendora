@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from app.models.funeral_home import FuneralHome
 from app.models.gift_collection import GiftCollection
 from app.models.user import User, UserRole
 from app.services.director_scope import is_main_director
+from app.services.financial_service import normalize_profit_percentage
 
 
 class FuneralHomeService:
@@ -124,6 +126,7 @@ class FuneralHomeService:
         address: Optional[dict] = None,
         logo_url: Optional[str] = None,
         director_id: Optional[UUID] = None,
+        profit_percentage: Optional[Decimal] = None,
     ) -> FuneralHome:
         """Create a funeral home, optionally assigning a director immediately."""
         funeral_home = FuneralHome(
@@ -134,6 +137,11 @@ class FuneralHomeService:
             address=address,
             logo_url=logo_url,
             is_active=True,
+            profit_percentage=(
+                normalize_profit_percentage(profit_percentage)
+                if profit_percentage is not None
+                else Decimal("0.00")
+            ),
         )
 
         self.db.add(funeral_home)
@@ -155,6 +163,8 @@ class FuneralHomeService:
         address: Optional[dict] = None,
         logo_url: Optional[str] = None,
         is_active: Optional[bool] = None,
+        profit_percentage: Optional[Decimal] = None,
+        profit_percentage_provided: bool = False,
     ) -> FuneralHome:
         """Update funeral home details."""
         funeral_home = await self.get_by_id(funeral_home_id)
@@ -175,6 +185,10 @@ class FuneralHomeService:
             funeral_home.logo_url = logo_url
         if is_active is not None:
             funeral_home.is_active = is_active
+        if profit_percentage_provided:
+            funeral_home.profit_percentage = normalize_profit_percentage(
+                profit_percentage if profit_percentage is not None else Decimal("0.00")
+            )
 
         await self.db.flush()
         await self.db.refresh(funeral_home)

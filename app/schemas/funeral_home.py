@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
@@ -25,6 +26,12 @@ class FuneralHomeCreate(FuneralHomeBase):
         None,
         description="Optionally assign a DIRECTOR user at creation time",
     )
+    profit_percentage: Optional[Decimal] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Director commission rate for this funeral home (SUPER_ADMIN only)",
+    )
 
 
 class FuneralHomeUpdate(BaseModel):
@@ -37,6 +44,7 @@ class FuneralHomeUpdate(BaseModel):
     address: Optional[DeliveryAddress] = None
     logo_url: Optional[str] = None
     is_active: Optional[bool] = None
+    profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class AssignDirectorRequest(BaseModel):
@@ -60,6 +68,7 @@ class FuneralHomeResponse(FuneralHomeBase):
     director: Optional[UserRef] = None
     directors: List[UserRef] = Field(default_factory=list)
     is_active: bool
+    profit_percentage: Optional[Decimal] = None
     family_count: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None

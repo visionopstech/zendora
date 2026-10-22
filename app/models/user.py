@@ -1,7 +1,6 @@
 import enum
 import uuid
 from datetime import datetime
-from decimal import Decimal
 
 from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, JSON, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -150,13 +149,6 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
-    director_commission: Mapped[Optional["DirectorCommission"]] = relationship(
-        "DirectorCommission",
-        back_populates="director",
-        uselist=False,
-        cascade="all, delete-orphan"
-    )
-
     wallet: Mapped[Optional["Wallet"]] = relationship(
         "Wallet",
         back_populates="director",
@@ -223,16 +215,6 @@ class User(Base):
     def is_vendor(self) -> bool:
         """Check if user is a vendor."""
         return self.role == UserRole.VENDOR.value
-
-    @property
-    def profit_percentage(self) -> Optional[Decimal]:
-        """Expose commission config on API responses when already loaded."""
-        state = inspect(self)
-        if "director_commission" in state.unloaded:
-            return None
-        if not self.director_commission:
-            return None
-        return self.director_commission.profit_percentage
 
     @property
     def display_name(self) -> str:

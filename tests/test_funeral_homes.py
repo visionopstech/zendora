@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -18,7 +19,12 @@ os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 from app.api import funeral_homes as funeral_homes_api
 from app.core.exceptions import ConflictError, PermissionDenied
 from app.models.user import UserRole
-from app.schemas.funeral_home import AssignDirectorRequest, FuneralHomeCreate, SetMainDirectorRequest
+from app.schemas.funeral_home import (
+    AssignDirectorRequest,
+    FuneralHomeCreate,
+    FuneralHomeUpdate,
+    SetMainDirectorRequest,
+)
 from app.services.funeral_home_service import FuneralHomeService
 
 
@@ -49,6 +55,7 @@ def make_funeral_home(**kwargs):
         director=kwargs.get("director"),
         members=kwargs.get("members", []),
         is_active=kwargs.get("is_active", True),
+        profit_percentage=kwargs.get("profit_percentage", Decimal("0.00")),
         created_at=kwargs.get("created_at", datetime.utcnow()),
         updated_at=kwargs.get("updated_at"),
     )
@@ -239,3 +246,129 @@ async def test_set_main_director_endpoint_maps_conflict(monkeypatch):
         )
 
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_funeral_home_persists_commission(monkeypatch):
+    db = SimpleNamespace(commit=AsyncMock())
+    created = make_funeral_home(profit_percentage=Decimal("12.50"))
+    service = SimpleNamespace(
+        create=AsyncMock(return_value=created),
+        get_by_id=AsyncMock(return_value=created),
+        list_directors=AsyncMock(return_value=[]),
+        count_families=AsyncMock(return_value=0),
+    )
+    current_user = make_user(UserRole.SUPER_ADMIN)
+
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    response = await funeral_homes_api.create_funeral_home(
+        funeral_home_data=FuneralHomeCreate(
+            name="Riverside Chapel",
+            profit_percentage=Decimal("12.50"),
+        ),
+        db=db,
+        current_user=current_user,
+    )
+
+    assert service.create.await_args.kwargs["profit_percentage"] == Decimal("12.50")
+    assert response.profit_percentage == Decimal("12.50")
+
+
+@pytest.mark.asyncio
+async def test_get_funeral_home_shows_commission_to_super_admin(monkeypatch):
+    home = make_funeral_home(profit_percentage=Decimal("20.00"))
+    service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=home),
+        list_directors=AsyncMock(return_value=[]),
+        count_families=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    response = await funeral_homes_api.get_funeral_home(
+        funeral_home_id=home.id,
+        db=SimpleNamespace(),
+        current_user=make_user(UserRole.SUPER_ADMIN),
+    )
+
+    assert response.profit_percentage == Decimal("20.00")
+
+
+@pytest.mark.asyncio
+async def test_get_funeral_home_hides_commission_from_director(monkeypatch):
+    home = make_funeral_home(profit_percentage=Decimal("20.00"))
+    service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=home),
+        list_directors=AsyncMock(return_value=[]),
+        count_families=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    response = await funeral_homes_api.get_funeral_home(
+        funeral_home_id=home.id,
+        db=SimpleNamespace(),
+        current_user=make_user(UserRole.DIRECTOR, funeral_home_id=home.id),
+    )
+
+    assert response.profit_percentage is None
+
+
+@pytest.mark.asyncio
+async def test_get_my_funeral_home_hides_commission_from_director(monkeypatch):
+    home = make_funeral_home(profit_percentage=Decimal("20.00"))
+    service = SimpleNamespace(
+        get_by_id=AsyncMock(return_value=home),
+        list_directors=AsyncMock(return_value=[]),
+        count_families=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    response = await funeral_homes_api.get_my_funeral_home(
+        db=SimpleNamespace(),
+        current_user=make_user(UserRole.DIRECTOR, funeral_home_id=home.id),
+    )
+
+    assert response.profit_percentage is None
+
+
+@pytest.mark.asyncio
+async def test_update_funeral_home_director_cannot_set_commission(monkeypatch):
+    home = make_funeral_home()
+    service = SimpleNamespace(get_by_id=AsyncMock(return_value=home), update=AsyncMock())
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    with pytest.raises(HTTPException) as exc:
+        await funeral_homes_api.update_funeral_home(
+            funeral_home_id=home.id,
+            funeral_home_data=FuneralHomeUpdate(profit_percentage=Decimal("15.00")),
+            db=SimpleNamespace(),
+            current_user=make_user(UserRole.DIRECTOR, funeral_home_id=home.id),
+        )
+
+    assert exc.value.status_code == 403
+    service.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_funeral_home_super_admin_sets_commission(monkeypatch):
+    home = make_funeral_home(profit_percentage=Decimal("10.00"))
+    updated = make_funeral_home(id=home.id, profit_percentage=Decimal("25.00"))
+    db = SimpleNamespace(commit=AsyncMock())
+    service = SimpleNamespace(
+        get_by_id=AsyncMock(side_effect=[home, updated]),
+        update=AsyncMock(return_value=updated),
+        list_directors=AsyncMock(return_value=[]),
+        count_families=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(funeral_homes_api, "FuneralHomeService", lambda _: service)
+
+    response = await funeral_homes_api.update_funeral_home(
+        funeral_home_id=home.id,
+        funeral_home_data=FuneralHomeUpdate(profit_percentage=Decimal("25.00")),
+        db=db,
+        current_user=make_user(UserRole.SUPER_ADMIN),
+    )
+
+    assert service.update.await_args.kwargs["profit_percentage"] == Decimal("25.00")
+    assert service.update.await_args.kwargs["profit_percentage_provided"] is True
+    assert response.profit_percentage == Decimal("25.00")

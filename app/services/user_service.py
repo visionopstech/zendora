@@ -20,7 +20,6 @@ class UserService:
         return [
             selectinload(User.funeral_home),
             selectinload(User.directed_funeral_home),
-            selectinload(User.director_commission),
         ]
     
     async def get_by_id(self, user_id: UUID) -> Optional[User]:

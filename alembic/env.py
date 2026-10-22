@@ -23,7 +23,6 @@ from app.models import (  # noqa: F401
     DefaultGiftCollectionProduct,
     Order,
     OrderProduct,
-    DirectorCommission,
     Wallet,
     WalletTransaction,
     OrderCommission,

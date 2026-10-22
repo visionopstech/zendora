@@ -26,7 +26,6 @@ async def create_user(
     
     - FAMILY_ADMIN users may omit director_id
     - VENDOR users must have a vendor_id
-    - profit_percentage is only valid for DIRECTOR users
     - Password must be at least 8 characters
     """
     user_service = UserManagementService(db)
@@ -43,7 +42,6 @@ async def create_user(
             vendor_id=user_data.vendor_id,
             deceased_first_name=user_data.deceased_first_name,
             deceased_last_name=user_data.deceased_last_name,
-            profit_percentage=user_data.profit_percentage
         )
         
         await db.commit()
@@ -212,7 +210,7 @@ async def update_user(
     Update user (SUPER_ADMIN only).
     
     - Can update email, first_name, last_name, role, is_active, director_id, funeral_home_id,
-      vendor_id, deceased names, profit_percentage and password
+      vendor_id, deceased names and password
     - Email must be unique
     - FAMILY_ADMIN users may have no director_id; sending director_id null unassigns it
     """
@@ -232,8 +230,6 @@ async def update_user(
             deceased_first_name=user_data.deceased_first_name,
             deceased_last_name=user_data.deceased_last_name,
             password=user_data.password,
-            profit_percentage=user_data.profit_percentage,
-            profit_percentage_provided="profit_percentage" in user_data.model_fields_set,
             director_id_provided="director_id" in user_data.model_fields_set,
         )
         

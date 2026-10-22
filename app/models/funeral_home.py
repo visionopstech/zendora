@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -35,6 +36,12 @@ class FuneralHome(Base):
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    profit_percentage: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

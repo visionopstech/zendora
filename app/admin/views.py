@@ -106,10 +106,13 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
 
     column_list = [
         FuneralHome.id, FuneralHome.name, FuneralHome.email,
-        FuneralHome.director_id, FuneralHome.is_active, FuneralHome.created_at
+        FuneralHome.director_id, FuneralHome.profit_percentage,
+        FuneralHome.is_active, FuneralHome.created_at
     ]
     column_searchable_list = [FuneralHome.name, FuneralHome.email, FuneralHome.description]
-    column_sortable_list = [FuneralHome.name, FuneralHome.is_active, FuneralHome.created_at]
+    column_sortable_list = [
+        FuneralHome.name, FuneralHome.profit_percentage, FuneralHome.is_active, FuneralHome.created_at
+    ]
     column_default_sort = [(FuneralHome.name, False)]
 
     column_filters = [FuneralHome.is_active, FuneralHome.created_at]
@@ -117,7 +120,7 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
     form_columns = [
         FuneralHome.name, FuneralHome.description, FuneralHome.email,
         FuneralHome.phone, FuneralHome.address, FuneralHome.logo_url,
-        FuneralHome.director, FuneralHome.is_active
+        FuneralHome.director, FuneralHome.profit_percentage, FuneralHome.is_active
     ]
 
     column_formatters = {
@@ -153,6 +156,7 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
         FuneralHome.logo_url: "Logo URL",
         FuneralHome.director_id: "Director ID",
         FuneralHome.director: "Director",
+        FuneralHome.profit_percentage: "Commission %",
         FuneralHome.is_active: "Active",
         FuneralHome.created_at: "Created At",
         FuneralHome.updated_at: "Updated At",

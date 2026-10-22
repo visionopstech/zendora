@@ -24,43 +24,6 @@ class WalletTransactionType(str, enum.Enum):
     DEBIT = "DEBIT"
 
 
-class DirectorCommission(Base):
-    """Stores commission configuration for a director."""
-
-    __tablename__ = "director_commissions"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True,
-        default=uuid.uuid4,
-        server_default="gen_random_uuid()",
-    )
-    director_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    profit_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=datetime.utcnow,
-        nullable=False,
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        onupdate=datetime.utcnow,
-        nullable=True,
-    )
-
-    director: Mapped["User"] = relationship("User", back_populates="director_commission")
-
-    def __repr__(self) -> str:
-        return (
-            f"<DirectorCommission(director_id={self.director_id}, "
-            f"profit_percentage={self.profit_percentage})>"
-        )
-
-
 class Wallet(Base):
     """Internal wallet ledger for directors and the platform."""
 

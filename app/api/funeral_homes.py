@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import ConflictError, NotFoundException, PermissionDenied
+from app.core.exceptions import ConflictError, NotFoundException, PermissionDenied, ValidationError
 from app.dependencies.auth import (
     get_current_user,
     require_director,
@@ -30,6 +30,7 @@ router = APIRouter()
 async def _build_response(
     service: FuneralHomeService,
     funeral_home: FuneralHome,
+    current_user: User,
 ) -> FuneralHomeResponse:
     """Serialize a funeral home together with its director and family count."""
     response = FuneralHomeResponse.model_validate(funeral_home)
@@ -39,6 +40,8 @@ async def _build_response(
     directors = await service.list_directors(funeral_home.id)
     response.directors = [UserRef.model_validate(director) for director in directors]
     response.family_count = await service.count_families(funeral_home.id)
+    if current_user.role != UserRole.SUPER_ADMIN.value:
+        response.profit_percentage = None
     return response
 
 
@@ -75,16 +78,19 @@ async def create_funeral_home(
             address=funeral_home_data.address.model_dump() if funeral_home_data.address else None,
             logo_url=funeral_home_data.logo_url,
             director_id=funeral_home_data.director_id,
+            profit_percentage=funeral_home_data.profit_percentage,
         )
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
-        return await _build_response(service, funeral_home)
+        return await _build_response(service, funeral_home, current_user)
     except ConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionDenied as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.get("", response_model=PaginatedResponse[FuneralHomeResponse])
@@ -125,7 +131,10 @@ async def list_funeral_homes(
         limit=pagination.limit,
     )
 
-    items = [await _build_response(service, funeral_home) for funeral_home in funeral_homes]
+    items = [
+        await _build_response(service, funeral_home, current_user)
+        for funeral_home in funeral_homes
+    ]
     return PaginatedResponse.build(
         items=items,
         total=total,
@@ -158,7 +167,7 @@ async def get_my_funeral_home(
             detail="Funeral home not found",
         )
 
-    return await _build_response(service, funeral_home)
+    return await _build_response(service, funeral_home, current_user)
 
 
 @router.get("/{funeral_home_id}", response_model=FuneralHomeResponse)
@@ -178,7 +187,7 @@ async def get_funeral_home(
         )
 
     _assert_can_read(current_user, funeral_home)
-    return await _build_response(service, funeral_home)
+    return await _build_response(service, funeral_home, current_user)
 
 
 @router.put("/{funeral_home_id}", response_model=FuneralHomeResponse)
@@ -191,8 +200,8 @@ async def update_funeral_home(
     """
     Update a funeral home.
     
-    - SUPER_ADMIN: any funeral home, including is_active
-    - DIRECTOR: only their own funeral home, and not is_active
+    - SUPER_ADMIN: any funeral home, including is_active and profit_percentage
+    - DIRECTOR: only their own funeral home, and not is_active or profit_percentage
     """
     service = FuneralHomeService(db)
     funeral_home = await service.get_by_id(funeral_home_id)
@@ -212,6 +221,13 @@ async def update_funeral_home(
             detail="Only super admins can activate or deactivate a funeral home",
         )
 
+    profit_percentage_provided = "profit_percentage" in funeral_home_data.model_fields_set
+    if profit_percentage_provided and current_user.role != UserRole.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can set funeral home commissions",
+        )
+
     try:
         updated = await service.update(
             funeral_home_id=funeral_home_id,
@@ -222,12 +238,16 @@ async def update_funeral_home(
             address=funeral_home_data.address.model_dump() if funeral_home_data.address else None,
             logo_url=funeral_home_data.logo_url,
             is_active=is_active,
+            profit_percentage=funeral_home_data.profit_percentage,
+            profit_percentage_provided=profit_percentage_provided,
         )
         await db.commit()
         updated = await service.get_by_id(updated.id)
-        return await _build_response(service, updated)
+        return await _build_response(service, updated, current_user)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.delete("/{funeral_home_id}", response_model=FuneralHomeResponse)
@@ -243,7 +263,7 @@ async def deactivate_funeral_home(
         funeral_home = await service.deactivate(funeral_home_id)
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
-        return await _build_response(service, funeral_home)
+        return await _build_response(service, funeral_home, current_user)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -270,7 +290,7 @@ async def add_director(
         )
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
-        return await _build_response(service, funeral_home)
+        return await _build_response(service, funeral_home, current_user)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ConflictError as e:
@@ -293,7 +313,7 @@ async def set_main_director(
         funeral_home = await service.set_main_director(funeral_home_id, request.user_id)
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
-        return await _build_response(service, funeral_home)
+        return await _build_response(service, funeral_home, current_user)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ConflictError as e:
@@ -323,7 +343,7 @@ async def remove_director(
         )
         await db.commit()
         funeral_home = await service.get_by_id(funeral_home.id)
-        return await _build_response(service, funeral_home)
+        return await _build_response(service, funeral_home, current_user)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ConflictError as e:

@@ -15,7 +15,7 @@ os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
-from app.models.finance import Wallet, WalletType
+from app.models.finance import OrderCommission, Wallet, WalletType
 from app.models.gift_collection import GiftCollection
 from app.models.order import Order, OrderProduct
 from app.schemas.gift_collection import GiftInCollection
@@ -139,7 +139,7 @@ async def test_order_service_create_order_creates_commission_snapshot_for_collec
     collection = SimpleNamespace(id=uuid4(), director_id=uuid4(), funeral_home_id=uuid4())
     db = FakeSession(collection=collection)
     financial_service = SimpleNamespace(
-        get_director_profit_percentage=AsyncMock(return_value=Decimal("20.00")),
+        get_funeral_home_profit_percentage=AsyncMock(return_value=Decimal("20.00")),
         calculate_order_commission=AsyncMock(
             return_value={
                 "base_amount": Decimal("10.00"),
@@ -175,20 +175,24 @@ async def test_order_service_create_order_creates_commission_snapshot_for_collec
     assert order.funeral_home_id == collection.funeral_home_id
     assert any(isinstance(item, Order) for item in db.added)
     assert any(isinstance(item, OrderProduct) for item in db.added)
+    financial_service.get_funeral_home_profit_percentage.assert_awaited_once_with(
+        collection.funeral_home_id
+    )
     financial_service.create_order_commission_snapshot.assert_awaited_once_with(
         order_id=order.id,
         director_id=collection.director_id,
         products=[product],
         quantities={product.id: 1},
+        funeral_home_id=collection.funeral_home_id,
     )
 
 
 @pytest.mark.asyncio
-async def test_order_service_create_order_without_director_uses_zero_director_profit(monkeypatch):
+async def test_order_service_create_order_without_home_uses_zero_director_profit(monkeypatch):
     collection = SimpleNamespace(id=uuid4(), director_id=None, funeral_home_id=None)
     db = FakeSession(collection=collection)
     financial_service = SimpleNamespace(
-        get_director_profit_percentage=AsyncMock(),
+        get_funeral_home_profit_percentage=AsyncMock(return_value=Decimal("0.00")),
         calculate_order_commission=AsyncMock(
             return_value={
                 "base_amount": Decimal("10.00"),
@@ -216,14 +220,111 @@ async def test_order_service_create_order_without_director_uses_zero_director_pr
         quantities={product.id: 1},
     )
 
-    financial_service.get_director_profit_percentage.assert_not_awaited()
+    financial_service.get_funeral_home_profit_percentage.assert_awaited_once_with(None)
     financial_service.create_order_commission_snapshot.assert_awaited_once_with(
         order_id=order.id,
         director_id=None,
         products=[product],
         quantities={product.id: 1},
+        funeral_home_id=None,
     )
     assert order.funeral_home_id is None
+
+
+@pytest.mark.asyncio
+async def test_order_service_create_order_uses_funeral_home_rate_without_director(monkeypatch):
+    collection = SimpleNamespace(id=uuid4(), director_id=None, funeral_home_id=uuid4())
+    db = FakeSession(collection=collection)
+    financial_service = SimpleNamespace(
+        get_funeral_home_profit_percentage=AsyncMock(return_value=Decimal("20.00")),
+        calculate_order_commission=AsyncMock(
+            return_value={
+                "base_amount": Decimal("10.00"),
+                "final_amount": Decimal("20.00"),
+                "raw_benefit_amount": Decimal("10.00"),
+                "director_profit_percentage": Decimal("20.00"),
+                "director_profit_amount": Decimal("4.00"),
+                "platform_profit_amount": Decimal("6.00"),
+            }
+        ),
+        create_order_commission_snapshot=AsyncMock(),
+    )
+
+    monkeypatch.setattr(order_service_module, "FinancialService", lambda _: financial_service)
+
+    service = OrderService(db)
+    product = SimpleNamespace(id=uuid4(), name="Car seat", price=Decimal("20.00"))
+
+    order = await service.create_order(
+        visitor_id=uuid4(),
+        gift_collection_id=collection.id,
+        family_admin_id=uuid4(),
+        stripe_session_id="temp_123",
+        products=[product],
+        quantities={product.id: 1},
+    )
+
+    financial_service.get_funeral_home_profit_percentage.assert_awaited_once_with(
+        collection.funeral_home_id
+    )
+    financial_service.create_order_commission_snapshot.assert_awaited_once_with(
+        order_id=order.id,
+        director_id=None,
+        products=[product],
+        quantities={product.id: 1},
+        funeral_home_id=collection.funeral_home_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_order_commission_snapshot_uses_funeral_home_rate(monkeypatch):
+    db = FakeSession()
+    service = FinancialService(db)
+    monkeypatch.setattr(
+        service,
+        "get_funeral_home_profit_percentage",
+        AsyncMock(return_value=Decimal("20.00")),
+    )
+    product = SimpleNamespace(
+        id=uuid4(),
+        base_price=Decimal("10.00"),
+        price=Decimal("20.00"),
+    )
+    director_id = uuid4()
+    funeral_home_id = uuid4()
+
+    commission = await service.create_order_commission_snapshot(
+        order_id=uuid4(),
+        director_id=director_id,
+        products=[product],
+        quantities={product.id: 1},
+        funeral_home_id=funeral_home_id,
+    )
+
+    assert isinstance(commission, OrderCommission)
+    assert commission.director_id == director_id
+    assert commission.director_profit_percentage == Decimal("20.00")
+    assert commission.director_profit_amount == Decimal("4.00")
+    service.get_funeral_home_profit_percentage.assert_awaited_once_with(funeral_home_id)
+
+
+@pytest.mark.asyncio
+async def test_get_funeral_home_profit_percentage_missing_home_is_zero():
+    service = FinancialService(FakeSession())
+    assert await service.get_funeral_home_profit_percentage(None) == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_get_funeral_home_profit_percentage_returns_home_rate():
+    funeral_home_id = uuid4()
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: Decimal("15.50"))
+    )
+    service = FinancialService(db)
+
+    assert await service.get_funeral_home_profit_percentage(funeral_home_id) == Decimal("15.50")
+    db.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio

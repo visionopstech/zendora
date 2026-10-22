@@ -33,7 +33,6 @@ class UserCreate(UserBase):
     vendor_id: Optional[UUID] = None
     deceased_first_name: Optional[str] = Field(None, min_length=1, max_length=255)
     deceased_last_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class UserRegister(BaseModel):
@@ -72,7 +71,6 @@ class UserResponse(UserBase):
     vendor_id: Optional[UUID] = None
     deceased_first_name: Optional[str] = None
     deceased_last_name: Optional[str] = None
-    profit_percentage: Optional[Decimal] = None
     is_main_director: bool = False
     created_at: datetime
     
@@ -145,7 +143,6 @@ class UserManagementUpdate(BaseModel):
     vendor_id: Optional[UUID] = None
     deceased_first_name: Optional[str] = Field(None, min_length=1, max_length=255)
     deceased_last_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    profit_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
     password: Optional[str] = Field(None, min_length=8, description="New password (optional)")
 
 

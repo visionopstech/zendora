@@ -3,7 +3,6 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional, List
-from decimal import Decimal
 
 from app.models.funeral_home import FuneralHome
 from app.models.user import User, UserRole
@@ -11,7 +10,6 @@ from app.models.vendor import Vendor
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
 from app.services.director_scope import assert_can_delete_director, is_main_director
-from app.services.financial_service import FinancialService
 
 
 class UserManagementService:
@@ -25,7 +23,6 @@ class UserManagementService:
         result = await self.db.execute(
             select(User)
             .options(
-                selectinload(User.director_commission),
                 selectinload(User.funeral_home),
                 selectinload(User.directed_funeral_home),
             )
@@ -38,7 +35,6 @@ class UserManagementService:
         result = await self.db.execute(
             select(User)
             .options(
-                selectinload(User.director_commission),
                 selectinload(User.funeral_home),
                 selectinload(User.directed_funeral_home),
             )
@@ -94,7 +90,6 @@ class UserManagementService:
         total = (await self.db.execute(count_query)).scalar() or 0
         
         query = select(User).options(
-            selectinload(User.director_commission),
             selectinload(User.funeral_home),
             selectinload(User.directed_funeral_home),
         )
@@ -111,7 +106,6 @@ class UserManagementService:
     
     def _user_options(self):
         return [
-            selectinload(User.director_commission),
             selectinload(User.funeral_home),
             selectinload(User.directed_funeral_home),
         ]
@@ -162,7 +156,6 @@ class UserManagementService:
         vendor_id: Optional[UUID] = None,
         deceased_first_name: Optional[str] = None,
         deceased_last_name: Optional[str] = None,
-        profit_percentage: Optional[Decimal] = None
     ) -> User:
         """Create a new user."""
         existing_user = await self.get_by_email(email)
@@ -171,9 +164,6 @@ class UserManagementService:
         
         if role == UserRole.VENDOR and not vendor_id:
             raise PermissionDenied("VENDOR users must have a vendor_id")
-
-        if profit_percentage is not None and role != UserRole.DIRECTOR:
-            raise PermissionDenied("profit_percentage can only be set for DIRECTOR users")
         
         director = None
         if director_id:
@@ -214,10 +204,6 @@ class UserManagementService:
         self.db.add(user)
         await self.db.flush()
 
-        if role == UserRole.DIRECTOR and profit_percentage is not None:
-            financial_service = FinancialService(self.db)
-            await financial_service.upsert_director_commission(user.id, profit_percentage)
-
         user = await self.get_by_id(user.id)
         
         return user
@@ -236,8 +222,6 @@ class UserManagementService:
         deceased_first_name: Optional[str] = None,
         deceased_last_name: Optional[str] = None,
         password: Optional[str] = None,
-        profit_percentage: Optional[Decimal] = None,
-        profit_percentage_provided: bool = False,
         director_id_provided: bool = False,
     ) -> User:
         """Update user details."""
@@ -261,11 +245,9 @@ class UserManagementService:
         if deceased_last_name is not None:
             user.deceased_last_name = deceased_last_name
         
-        resulting_role = user.role
         if role is not None:
             role_value = role.value if isinstance(role, UserRole) else role
             user.role = role_value
-            resulting_role = role_value
             
             if role == UserRole.VENDOR and not (user.vendor_id or vendor_id):
                 raise PermissionDenied("VENDOR users must have a vendor_id")
@@ -299,22 +281,6 @@ class UserManagementService:
         
         if password:
             user.password_hash = hash_password(password)
-
-        if (
-            profit_percentage_provided
-            and profit_percentage is not None
-            and resulting_role != UserRole.DIRECTOR.value
-        ):
-            raise PermissionDenied("profit_percentage can only be set for DIRECTOR users")
-
-        financial_service = FinancialService(self.db)
-        if resulting_role == UserRole.DIRECTOR.value:
-            if profit_percentage_provided:
-                await financial_service.upsert_director_commission(user.id, profit_percentage)
-        else:
-            commission = await financial_service.get_director_commission(user.id)
-            if commission:
-                await self.db.delete(commission)
         
         await self.db.flush()
         user = await self.get_by_id(user.id)
