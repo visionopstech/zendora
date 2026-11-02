@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # Third-Party Auth
     third_party_auth_url: Optional[str] = None
     third_party_auth_token: Optional[str] = None
+
+    # Foveo sync (disabled when the shared secret is unset)
+    foveo_sync_secret: Optional[str] = None
+    foveo_placeholder_email_domains: list[str] = ["foveo.org"]
     
     # Frontend
     frontend_url: str = "https://localhost:3000"

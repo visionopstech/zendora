@@ -1,6 +1,7 @@
 # Import all models to ensure they're registered with Base
 from app.models.user import User, UserRole
 from app.models.funeral_home import FuneralHome
+from app.models.foveo_sync_event import FoveoSyncEvent
 from app.models.vendor import Vendor
 from app.models.product import Product, ProductImage, ProductVendor
 from app.models.gift_collection import (
@@ -30,6 +31,7 @@ __all__ = [
     "User",
     "UserRole",
     "FuneralHome",
+    "FoveoSyncEvent",
     "Vendor",
     "Product",
     "ProductImage",

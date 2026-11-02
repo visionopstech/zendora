@@ -16,6 +16,7 @@ from app.admin.views import (
     DefaultGiftCollectionProductAdmin,
     OrderProductAdmin,
     BannerPresetAdmin,
+    FoveoSyncEventAdmin,
 )
 from app.core.config import settings
 
@@ -57,6 +58,7 @@ def setup_admin(app, engine):
     admin.add_view(DefaultGiftCollectionProductAdmin)
     admin.add_view(OrderProductAdmin)
     admin.add_view(BannerPresetAdmin)
+    admin.add_view(FoveoSyncEventAdmin)
     
     return admin
 

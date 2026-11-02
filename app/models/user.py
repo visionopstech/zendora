@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, JSON, inspect
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, Integer, JSON, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional, List
 
@@ -66,6 +66,11 @@ class User(Base):
         ForeignKey("vendors.id", ondelete="SET NULL"),
         nullable=True,
         index=True
+    )
+
+    # Foveo identity (set only by the Foveo sync integration)
+    foveo_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, unique=True, index=True
     )
     
     # Timestamps
@@ -240,3 +245,4 @@ Index("idx_users_email", User.email)
 Index("idx_users_director_id", User.director_id)
 Index("idx_users_funeral_home_id", User.funeral_home_id)
 Index("idx_users_vendor_id", User.vendor_id)
+Index("idx_users_foveo_user_id", User.foveo_user_id)
