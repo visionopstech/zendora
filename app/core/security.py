@@ -13,11 +13,13 @@ PASSWORD_RESET_TOKEN_EXPIRE_HOURS = 1
 
 
 # Password hashing context
+# bcrypt is used for Zendora-only users. django_pbkdf2_sha256 verifies Foveo hashes
+# copied verbatim during sync; verify_password picks the scheme from the hash prefix.
 pwd_context = CryptContext(
-    schemes=["bcrypt"],
+    schemes=["bcrypt", "django_pbkdf2_sha256"],
     deprecated="auto",
     bcrypt__rounds=12,
-    bcrypt__ident="2b"
+    bcrypt__ident="2b",
 )
 
 

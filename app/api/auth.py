@@ -164,7 +164,7 @@ async def forgot_password(
 
     user = await user_service.get_by_email(request.email)
     token = None
-    if user and user.is_active:
+    if user and user.is_active and not getattr(user, "foveo_user_id", None):
         token = auth_service.generate_password_reset_token(user)
         from app.services.email_service import EmailService
 
@@ -203,6 +203,11 @@ async def reset_password(
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+    except PermissionDenied as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
 

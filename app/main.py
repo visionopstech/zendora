@@ -198,6 +198,7 @@ from app.api import (
     files,
     email_templates,
     banner_presets,
+    integrations_foveo,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
@@ -220,6 +221,11 @@ app.include_router(wishlist_public.router, prefix="/w", tags=["Public Gift Colle
 app.include_router(checkout.router, prefix="/w", tags=["Checkout"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(tasks.router, prefix="/api", tags=["Background Tasks"])
+app.include_router(
+    integrations_foveo.router,
+    prefix="/integrations/foveo",
+    tags=["Integrations - Foveo"],
+)
 
 upload_path = Path(settings.upload_dir)
 upload_path.mkdir(parents=True, exist_ok=True)

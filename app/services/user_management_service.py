@@ -9,6 +9,7 @@ from app.models.user import User, UserRole
 from app.models.vendor import Vendor
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
+from app.utils.foveo import FOVEO_PASSWORD_MANAGED_MESSAGE, is_foveo_linked
 from app.services.director_scope import assert_can_delete_director, is_main_director
 
 
@@ -280,6 +281,8 @@ class UserManagementService:
             user.vendor_id = vendor_id
         
         if password:
+            if is_foveo_linked(user):
+                raise PermissionDenied(FOVEO_PASSWORD_MANAGED_MESSAGE)
             user.password_hash = hash_password(password)
         
         await self.db.flush()

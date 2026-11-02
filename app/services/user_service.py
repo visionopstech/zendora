@@ -7,7 +7,8 @@ import secrets
 
 from app.models.user import User, UserRole
 from app.core.security import hash_password, verify_password
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import NotFoundException, PermissionDenied
+from app.utils.foveo import FOVEO_PASSWORD_MANAGED_MESSAGE, is_foveo_linked
 
 
 class UserService:
@@ -94,7 +95,9 @@ class UserService:
         user = await self.get_by_id(user_id)
         if not user:
             raise NotFoundException("User not found")
-        
+        if is_foveo_linked(user):
+            raise PermissionDenied(FOVEO_PASSWORD_MANAGED_MESSAGE)
+
         user.password_hash = hash_password(new_password)
         await self.db.flush()
         await self.db.refresh(user)

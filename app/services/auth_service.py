@@ -14,6 +14,7 @@ from app.core.security import (
 )
 from app.core.exceptions import UnauthorizedError, ConflictError, PermissionDenied
 from app.services.user_service import UserService
+from app.utils.foveo import FOVEO_PASSWORD_MANAGED_MESSAGE, is_foveo_linked
 
 
 # In-memory store for magic link tokens (in production, use Redis)
@@ -158,6 +159,9 @@ class AuthService:
 
         if not user or not user.is_active:
             raise UnauthorizedError("Invalid or expired password reset token")
+
+        if is_foveo_linked(user):
+            raise PermissionDenied(FOVEO_PASSWORD_MANAGED_MESSAGE)
 
         expected = password_reset_fingerprint(user.password_hash)
         if not compare_digest(expected, payload.get("pwd") or ""):

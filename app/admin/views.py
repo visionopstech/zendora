@@ -6,6 +6,7 @@ import json
 
 from app.models.user import User, UserRole
 from app.models.funeral_home import FuneralHome
+from app.models.foveo_sync_event import FoveoSyncEvent
 from app.models.vendor import Vendor
 from app.models.product import Product, ProductImage, ProductVendor
 from app.models.gift_collection import GiftCollection, GiftCollectionProduct, GiftCollectionStatus
@@ -31,7 +32,8 @@ class UserAdmin(ModelView, model=User):
 
     column_list = [
         User.id, User.email, User.first_name, User.last_name, User.role,
-        User.is_active, User.director_id, User.funeral_home_id, User.vendor_id, User.created_at
+        User.is_active, User.director_id, User.funeral_home_id, User.vendor_id,
+        User.foveo_user_id, User.created_at
     ]
     column_searchable_list = [User.email, User.first_name, User.last_name]
     column_sortable_list = [User.email, User.role, User.is_active, User.created_at]
@@ -52,6 +54,7 @@ class UserAdmin(ModelView, model=User):
         User.director_id: lambda m, a: format_uuid(m.director_id) if m.director_id else "",
         User.funeral_home_id: lambda m, a: format_uuid(m.funeral_home_id) if m.funeral_home_id else "",
         User.vendor_id: lambda m, a: format_uuid(m.vendor_id) if m.vendor_id else "",
+        User.foveo_user_id: lambda m, a: m.foveo_user_id if m.foveo_user_id is not None else "",
     }
 
     form_overrides = {
@@ -83,6 +86,7 @@ class UserAdmin(ModelView, model=User):
         User.funeral_home: "Funeral Home",
         User.vendor_id: "Vendor ID",
         User.vendor: "Vendor",
+        User.foveo_user_id: "Foveo User ID",
         User.created_at: "Created At",
         User.updated_at: "Updated At",
     }
@@ -106,7 +110,8 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
 
     column_list = [
         FuneralHome.id, FuneralHome.name, FuneralHome.email,
-        FuneralHome.director_id, FuneralHome.profit_percentage,
+        FuneralHome.director_id, FuneralHome.foveo_funeral_home_id,
+        FuneralHome.profit_percentage,
         FuneralHome.is_active, FuneralHome.created_at
     ]
     column_searchable_list = [FuneralHome.name, FuneralHome.email, FuneralHome.description]
@@ -128,6 +133,9 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
         FuneralHome.is_active: lambda m, a: format_boolean(m.is_active),
         FuneralHome.created_at: lambda m, a: format_datetime(m.created_at),
         FuneralHome.director_id: lambda m, a: format_uuid(m.director_id) if m.director_id else "",
+        FuneralHome.foveo_funeral_home_id: lambda m, a: (
+            m.foveo_funeral_home_id if m.foveo_funeral_home_id is not None else ""
+        ),
         FuneralHome.address: lambda m, a: format_address(m.address),
     }
 
@@ -156,6 +164,7 @@ class FuneralHomeAdmin(ModelView, model=FuneralHome):
         FuneralHome.logo_url: "Logo URL",
         FuneralHome.director_id: "Director ID",
         FuneralHome.director: "Director",
+        FuneralHome.foveo_funeral_home_id: "Foveo Funeral Home ID",
         FuneralHome.profit_percentage: "Commission %",
         FuneralHome.is_active: "Active",
         FuneralHome.created_at: "Created At",
@@ -922,6 +931,48 @@ class OrderProductAdmin(ModelView, model=OrderProduct):
         OrderProduct.product_price: "Gift Price (Snapshot)",
         OrderProduct.quantity: "Quantity",
         OrderProduct.created_at: "Created At",
+    }
+
+    can_create = False
+    can_edit = False
+    can_delete = False
+    can_view_details = True
+    can_export = True
+
+    page_size = 50
+    page_size_options = [25, 50, 100, 200]
+
+
+class FoveoSyncEventAdmin(ModelView, model=FoveoSyncEvent):
+    """Read-only audit of inbound Foveo sync events."""
+
+    name = "Foveo Sync Event"
+    name_plural = "Foveo Sync Events"
+    icon = "fa-solid fa-right-left"
+
+    column_list = [
+        FoveoSyncEvent.event_id,
+        FoveoSyncEvent.received_at,
+        FoveoSyncEvent.foveo_stream_id,
+        FoveoSyncEvent.result,
+    ]
+    column_sortable_list = [FoveoSyncEvent.received_at]
+    column_default_sort = [(FoveoSyncEvent.received_at, True)]
+    column_filters = [FoveoSyncEvent.received_at]
+
+    column_formatters = {
+        FoveoSyncEvent.event_id: lambda m, a: format_uuid(m.event_id),
+        FoveoSyncEvent.received_at: lambda m, a: format_datetime(m.received_at),
+        FoveoSyncEvent.foveo_stream_id: lambda m, a: (
+            m.foveo_stream_id if m.foveo_stream_id is not None else ""
+        ),
+    }
+
+    column_labels = {
+        FoveoSyncEvent.event_id: "Event ID",
+        FoveoSyncEvent.received_at: "Received At",
+        FoveoSyncEvent.foveo_stream_id: "Foveo Stream ID",
+        FoveoSyncEvent.result: "Result",
     }
 
     can_create = False

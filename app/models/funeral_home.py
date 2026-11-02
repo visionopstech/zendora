@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -33,6 +33,11 @@ class FuneralHome(Base):
         nullable=True,
         unique=True,
         index=True,
+    )
+
+    # Foveo identity (set only by the Foveo sync integration)
+    foveo_funeral_home_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, unique=True, index=True
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
@@ -92,3 +97,4 @@ class FuneralHome(Base):
 
 Index("idx_funeral_homes_name", FuneralHome.name)
 Index("idx_funeral_homes_is_active", FuneralHome.is_active)
+Index("idx_funeral_homes_foveo_funeral_home_id", FuneralHome.foveo_funeral_home_id)
