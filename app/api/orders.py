@@ -2,12 +2,12 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import NotFoundException
-from app.dependencies.auth import get_current_user, require_super_admin
+from app.core.exceptions import NotFoundException, PermissionDenied, ValidationError
+from app.dependencies.auth import get_current_user, require_role, require_super_admin
 from app.models.order import Order, OrderStatus
 from app.models.user import User, UserRole
 from app.schemas.common import (
@@ -17,9 +17,17 @@ from app.schemas.common import (
     PaginationParams,
     UserRef,
 )
-from app.schemas.order import OrderProductResponse, OrderResponse, OrderUpdate
+from app.schemas.order import (
+    OrderProductResponse,
+    OrderResponse,
+    OrderStatusEmailRecipient,
+    OrderStatusEmailRequest,
+    OrderStatusEmailResponse,
+    OrderUpdate,
+)
 from app.schemas.vendor import VendorDashboardStats
 from app.services.director_scope import director_can_read_order, director_data_scope
+from app.services.email_service import EmailService, order_ready_for_status_email
 from app.services.order_service import OrderService
 
 router = APIRouter()
@@ -288,6 +296,75 @@ async def get_order(
         )
     
     return response
+
+
+@router.post("/{order_id}/status-email", response_model=OrderStatusEmailResponse)
+async def send_order_status_email(
+    order_id: UUID,
+    payload: OrderStatusEmailRequest = Body(default_factory=OrderStatusEmailRequest),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(
+        require_role(UserRole.SUPER_ADMIN, UserRole.DIRECTOR, UserRole.VENDOR)
+    ),
+):
+    """
+    Email the current status of a paid order.
+
+    SUPER_ADMIN, DIRECTOR, and VENDOR may send this manually. The order must
+    already be paid (PAID, REFUNDED, or FAILED after a successful payment).
+    Recipients are the buyer, family admin, collection director, vendor users,
+    and super admins.
+    """
+    order_service = OrderService(db)
+    order = await order_service.get_by_id(order_id, load_products=True)
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    if current_user.role == UserRole.DIRECTOR.value:
+        if not director_can_read_order(current_user, order):
+            raise PermissionDenied(
+                "You can only send status emails for orders you oversee"
+            )
+    elif current_user.role == UserRole.VENDOR.value:
+        if not current_user.vendor_id:
+            raise PermissionDenied("Vendor user must be linked to a vendor entity")
+        vendor_products, _amount = await order_service.get_order_vendor_products(
+            order.id, current_user.vendor_id
+        )
+        if not vendor_products:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found or does not contain your vendor's gifts",
+            )
+
+    if not order_ready_for_status_email(order):
+        raise ValidationError(
+            "Status emails can only be sent after an order has been paid"
+        )
+
+    email_service = EmailService(db)
+    deliveries = await email_service.notify_order_status_changed(
+        order,
+        current_user,
+        note=payload.note,
+    )
+    return OrderStatusEmailResponse(
+        order_id=order.id,
+        status=order.status,
+        sent_count=sum(1 for item in deliveries if item.sent),
+        recipients=[
+            OrderStatusEmailRecipient(
+                audience=item.audience,
+                email=item.email,
+                sent=item.sent,
+            )
+            for item in deliveries
+        ],
+    )
 
 
 @router.put("/{order_id}", response_model=OrderResponse)

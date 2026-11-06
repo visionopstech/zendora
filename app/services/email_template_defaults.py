@@ -195,6 +195,198 @@ DEFAULT_EMAIL_TEMPLATES: list[dict] = [
         ),
     },
     {
+        "slug": EmailTemplateSlug.ORDER_STATUS_CHANGED_VENDOR.value,
+        "name": "Order Status Update (Vendor)",
+        "subject": "Order {{ order.id }} is now {{ order.status }}",
+        "description": "Sent to vendor users when a super admin, director, or vendor manually sends a status update for a paid order.",
+        "available_variables": [
+            {"name": "order.id", "description": "Order ID"},
+            {"name": "order.status", "description": "Current order status"},
+            {"name": "order.total_amount", "description": "Order total"},
+            {"name": "products", "description": "This vendor's purchased gifts (name, quantity, price, total)"},
+            {"name": "product_count", "description": "Total quantity of this vendor's gifts"},
+            {"name": "price", "description": "Total price for this vendor's gifts"},
+            {"name": "family.name", "description": "Family admin name"},
+            {"name": "family.email", "description": "Family admin email"},
+            {"name": "family.deceased_name", "description": "Deceased person's name"},
+            {"name": "delivery.formatted", "description": "Delivery address"},
+            {"name": "vendor.name", "description": "Vendor name"},
+            {"name": "note", "description": "Optional note from the sender"},
+            {"name": "sender.name", "description": "Name of the person who sent the update"},
+            {"name": "sender.role", "description": "Role of the person who sent the update"},
+        ],
+        "body": _html_email(
+            "Order status update",
+            f"""
+            <p>The status of an order that includes your gifts has been updated.</p>
+            <div class="info-box">
+                <p><strong>Order ID:</strong> {{{{ order.id }}}}</p>
+                <p><strong>Status:</strong> {{{{ order.status }}}}</p>
+                <p><strong>Vendor:</strong> {{{{ vendor.name }}}}</p>
+                <p><strong>Product count:</strong> {{{{ product_count }}}}</p>
+                <p><strong>Price:</strong> ${{{{ price }}}}</p>
+                <p><strong>Updated by:</strong> {{{{ sender.name }}}} ({{{{ sender.role }}}})</p>
+                {{% if note %}}<p><strong>Note:</strong> {{{{ note }}}}</p>{{% endif %}}
+            </div>
+            <div class="info-box">
+                <h3>Delivery</h3>
+                <p>{{{{ delivery.formatted }}}}</p>
+            </div>
+            <div class="info-box">
+                <h3>Products</h3>
+                {_PRODUCT_LOOP}
+            </div>
+            """,
+        ),
+    },
+    {
+        "slug": EmailTemplateSlug.ORDER_STATUS_CHANGED_FAMILY_ADMIN.value,
+        "name": "Order Status Update (Family Admin)",
+        "subject": "Order {{ order.id }} is now {{ order.status }}",
+        "description": "Sent to the family admin when a status update is sent for a paid order.",
+        "available_variables": [
+            {"name": "order.id", "description": "Order ID"},
+            {"name": "order.status", "description": "Current order status"},
+            {"name": "products", "description": "Purchased gifts"},
+            {"name": "collection.name", "description": "Collection name"},
+            {"name": "collection.link", "description": "Public collection URL"},
+            {"name": "buyer.name", "description": "Buyer name"},
+            {"name": "note", "description": "Optional note from the sender"},
+            {"name": "sender.name", "description": "Name of the person who sent the update"},
+            {"name": "sender.role", "description": "Role of the person who sent the update"},
+        ],
+        "body": _html_email(
+            "Order status update",
+            f"""
+            <p>An order on your collection has a new status.</p>
+            <div class="info-box">
+                <p><strong>Order ID:</strong> {{{{ order.id }}}}</p>
+                <p><strong>Status:</strong> {{{{ order.status }}}}</p>
+                <p><strong>Collection:</strong> {{{{ collection.name }}}}</p>
+                <p><strong>Buyer:</strong> {{{{ buyer.name }}}}</p>
+                <p><strong>Updated by:</strong> {{{{ sender.name }}}} ({{{{ sender.role }}}})</p>
+                {{% if note %}}<p><strong>Note:</strong> {{{{ note }}}}</p>{{% endif %}}
+            </div>
+            <div class="info-box">
+                <h3>Products</h3>
+                {_PRODUCT_LOOP}
+            </div>
+            """,
+        ),
+    },
+    {
+        "slug": EmailTemplateSlug.ORDER_STATUS_CHANGED_BUYER.value,
+        "name": "Order Status Update (Buyer)",
+        "subject": "Your order {{ order.id }} is now {{ order.status }}",
+        "description": "Sent to the buyer when a status update is sent for a paid order.",
+        "available_variables": [
+            {"name": "order.id", "description": "Order ID"},
+            {"name": "order.status", "description": "Current order status"},
+            {"name": "price_paid", "description": "Amount paid"},
+            {"name": "products", "description": "Purchased gifts"},
+            {"name": "family.deceased_name", "description": "Deceased person's name"},
+            {"name": "collection.name", "description": "Collection name"},
+            {"name": "note", "description": "Optional note from the sender"},
+            {"name": "sender.name", "description": "Name of the person who sent the update"},
+        ],
+        "body": _html_email(
+            "Order status update",
+            f"""
+            <p>There is an update on your order.</p>
+            <div class="info-box">
+                <p><strong>Order ID:</strong> {{{{ order.id }}}}</p>
+                <p><strong>Status:</strong> {{{{ order.status }}}}</p>
+                <p><strong>Price paid:</strong> ${{{{ price_paid }}}}</p>
+                <p><strong>Collection:</strong> {{{{ collection.name }}}}</p>
+                <p><strong>In memory of:</strong> {{{{ family.deceased_name }}}}</p>
+                {{% if note %}}<p><strong>Note:</strong> {{{{ note }}}}</p>{{% endif %}}
+            </div>
+            <div class="info-box">
+                <h3>Products</h3>
+                {_PRODUCT_LOOP}
+            </div>
+            """,
+        ),
+    },
+    {
+        "slug": EmailTemplateSlug.ORDER_STATUS_CHANGED_SUPER_ADMIN.value,
+        "name": "Order Status Update (Super Admin)",
+        "subject": "Order {{ order.id }} is now {{ order.status }}",
+        "description": "Sent to super admins when a status update is sent for a paid order.",
+        "available_variables": [
+            {"name": "order.id", "description": "Order ID"},
+            {"name": "order.status", "description": "Current order status"},
+            {"name": "order.total_amount", "description": "Total price"},
+            {"name": "buyer.name", "description": "Buyer name"},
+            {"name": "buyer.email", "description": "Buyer email"},
+            {"name": "family.name", "description": "Family admin name"},
+            {"name": "vendors", "description": "List of vendor names"},
+            {"name": "products", "description": "Purchased gifts"},
+            {"name": "note", "description": "Optional note from the sender"},
+            {"name": "sender.name", "description": "Name of the person who sent the update"},
+            {"name": "sender.email", "description": "Email of the person who sent the update"},
+            {"name": "sender.role", "description": "Role of the person who sent the update"},
+        ],
+        "body": _html_email(
+            "Order status update",
+            f"""
+            <p>A paid order status update was sent.</p>
+            <div class="info-box">
+                <p><strong>Order ID:</strong> {{{{ order.id }}}}</p>
+                <p><strong>Status:</strong> {{{{ order.status }}}}</p>
+                <p><strong>Total price:</strong> ${{{{ order.total_amount }}}}</p>
+                <p><strong>Buyer:</strong> {{{{ buyer.name }}}} ({{{{ buyer.email }}}})</p>
+                <p><strong>Family:</strong> {{{{ family.name }}}}</p>
+                <p><strong>Vendors:</strong>
+                    {{% for vendor in vendors %}}{{{{ vendor.name }}}}{{% if not loop.last %}}, {{% endif %}}{{% endfor %}}
+                </p>
+                <p><strong>Sent by:</strong> {{{{ sender.name }}}} ({{{{ sender.role }}}}, {{{{ sender.email }}}})</p>
+                {{% if note %}}<p><strong>Note:</strong> {{{{ note }}}}</p>{{% endif %}}
+            </div>
+            <div class="info-box">
+                <h3>Products</h3>
+                {_PRODUCT_LOOP}
+            </div>
+            """,
+        ),
+    },
+    {
+        "slug": EmailTemplateSlug.ORDER_STATUS_CHANGED_DIRECTOR.value,
+        "name": "Order Status Update (Director)",
+        "subject": "Order {{ order.id }} is now {{ order.status }}",
+        "description": "Sent to the collection director when a status update is sent for a paid order.",
+        "available_variables": [
+            {"name": "order.id", "description": "Order ID"},
+            {"name": "order.status", "description": "Current order status"},
+            {"name": "products", "description": "Purchased gifts"},
+            {"name": "collection.name", "description": "Collection name"},
+            {"name": "family.name", "description": "Family admin name"},
+            {"name": "buyer.name", "description": "Buyer name"},
+            {"name": "note", "description": "Optional note from the sender"},
+            {"name": "sender.name", "description": "Name of the person who sent the update"},
+            {"name": "sender.role", "description": "Role of the person who sent the update"},
+        ],
+        "body": _html_email(
+            "Order status update",
+            f"""
+            <p>An order you oversee has a new status.</p>
+            <div class="info-box">
+                <p><strong>Order ID:</strong> {{{{ order.id }}}}</p>
+                <p><strong>Status:</strong> {{{{ order.status }}}}</p>
+                <p><strong>Collection:</strong> {{{{ collection.name }}}}</p>
+                <p><strong>Family:</strong> {{{{ family.name }}}}</p>
+                <p><strong>Buyer:</strong> {{{{ buyer.name }}}}</p>
+                <p><strong>Updated by:</strong> {{{{ sender.name }}}} ({{{{ sender.role }}}})</p>
+                {{% if note %}}<p><strong>Note:</strong> {{{{ note }}}}</p>{{% endif %}}
+            </div>
+            <div class="info-box">
+                <h3>Products</h3>
+                {_PRODUCT_LOOP}
+            </div>
+            """,
+        ),
+    },
+    {
         "slug": EmailTemplateSlug.COLLECTION_CREATED_FAMILY_ADMIN.value,
         "name": "Collection Created (Family Admin)",
         "subject": "Your Zendora collection has been created",
@@ -320,6 +512,52 @@ SAMPLE_EMAIL_CONTEXTS: dict[str, dict] = {
         "vendors": [{"name": "Bloom Vendor"}],
         "products": [{"name": "Sympathy flowers", "quantity": 1, "price": "24.50", "total": "24.50"}],
     },
+    EmailTemplateSlug.ORDER_STATUS_CHANGED_VENDOR.value: {
+        "order": {"id": "00000000-0000-0000-0000-000000000001", "status": "REFUNDED", "total_amount": "49.00"},
+        "products": [{"name": "Sympathy flowers", "quantity": 2, "price": "24.50", "total": "49.00"}],
+        "product_count": 2,
+        "price": "49.00",
+        "family": {"name": "Jane Family", "email": "family@example.com", "deceased_name": "John Doe"},
+        "delivery": {"formatted": "1 Main St, Springfield, IL 62701, USA"},
+        "vendor": {"name": "Bloom Vendor"},
+        "note": "Refunded at the family's request.",
+        "sender": {"name": "Dana Director", "email": "director@example.com", "role": "DIRECTOR"},
+    },
+    EmailTemplateSlug.ORDER_STATUS_CHANGED_FAMILY_ADMIN.value: {
+        "order": {"id": "00000000-0000-0000-0000-000000000001", "status": "REFUNDED"},
+        "products": [{"name": "Sympathy flowers", "quantity": 1, "price": "24.50", "total": "24.50"}],
+        "collection": {"name": "In Memory of John", "link": "http://localhost:3000/w/abc123"},
+        "buyer": {"name": "Alex Buyer", "email": "buyer@example.com"},
+        "note": "Refunded at the family's request.",
+        "sender": {"name": "Dana Director", "email": "director@example.com", "role": "DIRECTOR"},
+    },
+    EmailTemplateSlug.ORDER_STATUS_CHANGED_BUYER.value: {
+        "order": {"id": "00000000-0000-0000-0000-000000000001", "status": "REFUNDED"},
+        "price_paid": "24.50",
+        "products": [{"name": "Sympathy flowers", "quantity": 1, "price": "24.50", "total": "24.50"}],
+        "family": {"name": "Jane Family", "deceased_name": "John Doe"},
+        "collection": {"name": "In Memory of John", "link": "http://localhost:3000/w/abc123"},
+        "note": "",
+        "sender": {"name": "Dana Director", "role": "DIRECTOR"},
+    },
+    EmailTemplateSlug.ORDER_STATUS_CHANGED_SUPER_ADMIN.value: {
+        "order": {"id": "00000000-0000-0000-0000-000000000001", "status": "REFUNDED", "total_amount": "24.50"},
+        "buyer": {"name": "Alex Buyer", "email": "buyer@example.com"},
+        "family": {"name": "Jane Family", "email": "family@example.com"},
+        "vendors": [{"name": "Bloom Vendor"}],
+        "products": [{"name": "Sympathy flowers", "quantity": 1, "price": "24.50", "total": "24.50"}],
+        "note": "Refunded at the family's request.",
+        "sender": {"name": "Dana Director", "email": "director@example.com", "role": "DIRECTOR"},
+    },
+    EmailTemplateSlug.ORDER_STATUS_CHANGED_DIRECTOR.value: {
+        "order": {"id": "00000000-0000-0000-0000-000000000001", "status": "PAID"},
+        "products": [{"name": "Sympathy flowers", "quantity": 1, "price": "24.50", "total": "24.50"}],
+        "collection": {"name": "In Memory of John"},
+        "family": {"name": "Jane Family"},
+        "buyer": {"name": "Alex Buyer"},
+        "note": "Gifts are being prepared.",
+        "sender": {"name": "Bloom Vendor", "role": "VENDOR"},
+    },
     EmailTemplateSlug.COLLECTION_CREATED_FAMILY_ADMIN.value: {
         "collection": {"name": "In Memory of John", "link": "http://localhost:3000/w/abc123"},
     },
@@ -339,3 +577,13 @@ SAMPLE_EMAIL_CONTEXTS: dict[str, dict] = {
         "collection": {"name": "In Memory of John", "link": "http://localhost:3000/w/abc123"},
     },
 }
+
+ORDER_STATUS_EMAIL_SLUGS = frozenset(
+    {
+        EmailTemplateSlug.ORDER_STATUS_CHANGED_VENDOR.value,
+        EmailTemplateSlug.ORDER_STATUS_CHANGED_FAMILY_ADMIN.value,
+        EmailTemplateSlug.ORDER_STATUS_CHANGED_BUYER.value,
+        EmailTemplateSlug.ORDER_STATUS_CHANGED_SUPER_ADMIN.value,
+        EmailTemplateSlug.ORDER_STATUS_CHANGED_DIRECTOR.value,
+    }
+)

@@ -199,6 +199,38 @@ def buyer_order_context(order: Order) -> dict[str, Any]:
     return context
 
 
+def _status_change_fields(
+    order: Order,
+    sender: User,
+    note: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "note": (note or "").strip(),
+        "sender": {
+            "name": user_name(sender),
+            "email": sender.email or "",
+            "role": getattr(sender, "role", "") or "",
+        },
+        "status": order.status or "",
+    }
+
+
+def with_status_change(
+    context: dict[str, Any],
+    order: Order,
+    sender: User,
+    note: Optional[str] = None,
+) -> dict[str, Any]:
+    """Add the current status, optional note, and sender to an order email context."""
+    fields = _status_change_fields(order, sender, note)
+    order_info = dict(context.get("order") or {})
+    order_info["status"] = fields["status"]
+    context["order"] = order_info
+    context["note"] = fields["note"]
+    context["sender"] = fields["sender"]
+    return context
+
+
 def super_admin_order_context(order: Order) -> dict[str, Any]:
     context = order_base_context(order)
     vendors = []

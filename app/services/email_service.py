@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from app.core.security import PASSWORD_RESET_TOKEN_EXPIRE_HOURS
 from app.core.database import AsyncSessionLocal
 from app.models.email_template import EmailTemplateSlug
 from app.models.gift_collection import GiftCollection
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
 from app.models.user import User, UserRole
 from app.services.email_context import (
     active_vendor_users,
@@ -24,10 +25,31 @@ from app.services.email_context import (
     group_order_products_by_vendor,
     super_admin_order_context,
     vendor_order_context,
+    with_status_change,
 )
 from app.services.email_template_service import EmailTemplateService
 
 logger = logging.getLogger(__name__)
+
+# Status mail is for an order that has already been paid. REFUNDED is a later
+# change. FAILED counts only when payment previously succeeded.
+POST_PAYMENT_STATUSES = frozenset(
+    {OrderStatus.PAID.value, OrderStatus.REFUNDED.value}
+)
+
+
+def order_ready_for_status_email(order: Order) -> bool:
+    """True when the order has been paid, so a later status email is allowed."""
+    if order.status in POST_PAYMENT_STATUSES:
+        return True
+    return order.status == OrderStatus.FAILED.value and order.paid_at is not None
+
+
+@dataclass
+class StatusEmailDelivery:
+    audience: str
+    email: str
+    sent: bool
 
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "emails")
 jinja_env = Environment(
@@ -161,6 +183,88 @@ class EmailService:
                 email,
                 super_admin_context,
             )
+
+    async def _record_status_email(
+        self,
+        deliveries: list[StatusEmailDelivery],
+        audience: str,
+        slug: str,
+        to_email: Optional[str],
+        context: dict[str, Any],
+    ) -> None:
+        if not to_email:
+            return
+        sent = await self.send_templated_email(slug, to_email, context)
+        deliveries.append(StatusEmailDelivery(audience=audience, email=to_email, sent=sent))
+
+    async def notify_order_status_changed(
+        self,
+        order: Order,
+        sender: User,
+        note: Optional[str] = None,
+    ) -> list[StatusEmailDelivery]:
+        """Email every party on a paid order about its current status."""
+        deliveries: list[StatusEmailDelivery] = []
+
+        vendor_groups = group_order_products_by_vendor(order)
+        for vendor, vendor_products in vendor_groups.values():
+            context = with_status_change(
+                vendor_order_context(order, vendor, vendor_products),
+                order,
+                sender,
+                note,
+            )
+            for user in active_vendor_users(vendor):
+                await self._record_status_email(
+                    deliveries,
+                    "vendor",
+                    EmailTemplateSlug.ORDER_STATUS_CHANGED_VENDOR.value,
+                    user.email,
+                    context,
+                )
+
+        if order.family_admin and order.family_admin.email:
+            await self._record_status_email(
+                deliveries,
+                "family_admin",
+                EmailTemplateSlug.ORDER_STATUS_CHANGED_FAMILY_ADMIN.value,
+                order.family_admin.email,
+                with_status_change(family_admin_order_context(order), order, sender, note),
+            )
+
+        if order.visitor and order.visitor.email:
+            await self._record_status_email(
+                deliveries,
+                "buyer",
+                EmailTemplateSlug.ORDER_STATUS_CHANGED_BUYER.value,
+                order.visitor.email,
+                with_status_change(buyer_order_context(order), order, sender, note),
+            )
+
+        collection = order.gift_collection
+        director = collection.director if collection else None
+        if director and director.email:
+            await self._record_status_email(
+                deliveries,
+                "director",
+                EmailTemplateSlug.ORDER_STATUS_CHANGED_DIRECTOR.value,
+                director.email,
+                with_status_change(family_admin_order_context(order), order, sender, note),
+            )
+
+        super_admin_context = with_status_change(
+            super_admin_order_context(order), order, sender, note
+        )
+        for email in await self._super_admin_emails():
+            await self._record_status_email(
+                deliveries,
+                "super_admin",
+                EmailTemplateSlug.ORDER_STATUS_CHANGED_SUPER_ADMIN.value,
+                email,
+                super_admin_context,
+            )
+
+        return deliveries
 
     async def notify_collection_created(self, collection: GiftCollection) -> None:
         """Send collection-created emails to family admin, director, and super admins."""

@@ -62,3 +62,23 @@ class OrderUpdate(BaseModel):
     status: Optional[OrderStatus] = None
     total_amount: Optional[Decimal] = Field(None, gt=0)
     paid_at: Optional[datetime] = None
+
+
+class OrderStatusEmailRequest(BaseModel):
+    """Optional note included in a manually sent order status email."""
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class OrderStatusEmailRecipient(BaseModel):
+    """One attempted recipient of a status email."""
+    audience: str
+    email: str
+    sent: bool
+
+
+class OrderStatusEmailResponse(BaseModel):
+    """Result of a manual order status email send."""
+    order_id: UUID
+    status: OrderStatus
+    sent_count: int
+    recipients: List[OrderStatusEmailRecipient] = Field(default_factory=list)
