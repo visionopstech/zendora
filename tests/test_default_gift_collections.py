@@ -629,7 +629,7 @@ async def test_family_admin_cannot_create_default(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
+async def test_super_admin_can_create_deactivate_and_delete_default(monkeypatch):
     db = SimpleNamespace(commit=AsyncMock())
     current_user = make_user(UserRole.SUPER_ADMIN)
     created = make_default(created_by=current_user.id)
@@ -638,6 +638,7 @@ async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
         create=AsyncMock(return_value=created),
         get_by_id=AsyncMock(return_value=created),
         deactivate=AsyncMock(return_value=created),
+        delete=AsyncMock(return_value=None),
     )
 
     monkeypatch.setattr(
@@ -657,6 +658,11 @@ async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
         db=db,
         current_user=current_user,
     )
+    await default_collections_api.delete_default_gift_collection(
+        default_collection_id=created.id,
+        db=db,
+        current_user=current_user,
+    )
 
     service.create.assert_awaited_once()
     assert service.create.await_args.kwargs["owner_user_id"] is None
@@ -664,7 +670,9 @@ async def test_super_admin_can_create_and_deactivate_default(monkeypatch):
         service.create.await_args.kwargs["owner_scope"] == DefaultCollectionScope.ZENDORA
     )
     service.deactivate.assert_awaited_once_with(created.id)
+    service.delete.assert_awaited_once_with(created.id)
     assert created_response.created_by == current_user.id
+    assert db.commit.await_count == 3
 
 
 @pytest.mark.asyncio

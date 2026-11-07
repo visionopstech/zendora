@@ -497,7 +497,7 @@ class DefaultGiftCollectionService:
         return default_collection
 
     async def deactivate(self, default_collection_id: UUID) -> DefaultGiftCollection:
-        """Deactivate a default gift collection."""
+        """Mark a default gift collection inactive without removing it."""
 
         default_collection = await self.get_by_id(default_collection_id)
         if not default_collection:
@@ -507,6 +507,20 @@ class DefaultGiftCollectionService:
         await self.db.flush()
         await self.db.refresh(default_collection)
         return default_collection
+
+    async def delete(self, default_collection_id: UUID) -> None:
+        """Permanently remove a default gift collection and its gift rows.
+
+        Gift collections copied from it keep their own gifts. Their
+        source_default_collection_id is cleared by the database.
+        """
+
+        default_collection = await self.get_by_id(default_collection_id)
+        if not default_collection:
+            raise NotFoundException("Default gift collection not found")
+
+        await self.db.delete(default_collection)
+        await self.db.flush()
 
     def build_collection_payload(self, default_collection: DefaultGiftCollection) -> dict:
         """Build the gift collection payload copied from a default collection."""

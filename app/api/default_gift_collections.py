@@ -339,13 +339,19 @@ async def update_default_gift_collection(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.delete("/{default_collection_id}", response_model=DefaultGiftCollectionResponse)
+@router.post(
+    "/{default_collection_id}/deactivate",
+    response_model=DefaultGiftCollectionResponse,
+)
 async def deactivate_default_gift_collection(
     default_collection_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Deactivate a default gift collection. Inherited ones are read-only. This is a soft delete."""
+    """Deactivate a default gift collection. The row stays and can be activated again.
+
+    Inherited ones are read-only. Setting `is_active` on update does the same thing.
+    """
     service = DefaultGiftCollectionService(db)
     default_collection = await service.get_by_id(default_collection_id)
 
@@ -363,5 +369,35 @@ async def deactivate_default_gift_collection(
 
         updated = await service.get_by_id(default_collection_id, load_products=True)
         return _build_response(updated, True, current_user)
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete("/{default_collection_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_default_gift_collection(
+    default_collection_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete a default gift collection and its gifts.
+
+    Inherited ones are read-only. Collections already copied from this default
+    are left in place. Use deactivate, or set `is_active` to false, to hide it
+    without deleting it.
+    """
+    service = DefaultGiftCollectionService(db)
+    default_collection = await service.get_by_id(default_collection_id)
+
+    if not default_collection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Default gift collection not found",
+        )
+
+    await _assert_can_write(service, current_user, default_collection)
+
+    try:
+        await service.delete(default_collection_id)
+        await db.commit()
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

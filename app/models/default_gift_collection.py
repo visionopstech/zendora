@@ -87,11 +87,15 @@ class DefaultGiftCollection(Base):
     products: Mapped[List["DefaultGiftCollectionProduct"]] = relationship(
         "DefaultGiftCollectionProduct",
         back_populates="default_collection",
+        # Junction PKs include default_collection_id; do not SET NULL on delete.
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     derived_collections: Mapped[List["GiftCollection"]] = relationship(
         "GiftCollection",
         back_populates="source_default_collection",
+        # Copied collections keep their rows; the FK is ON DELETE SET NULL.
+        passive_deletes=True,
     )
 
     @property
