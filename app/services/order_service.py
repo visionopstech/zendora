@@ -122,6 +122,7 @@ class OrderService:
                 product_id=product.id,
                 product_name=product.name,
                 product_price=product.price,
+                base_price=product.base_price,
                 quantity=quantity
             )
             self.db.add(order_product)

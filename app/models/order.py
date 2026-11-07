@@ -140,6 +140,7 @@ class OrderProduct(Base):
     # Snapshot of product details at time of purchase
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     product_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     
     # Timestamps

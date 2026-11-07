@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.exceptions import NotFoundException, PermissionDenied, ValidationError
 from app.dependencies.auth import get_current_user, require_role, require_super_admin
-from app.models.order import Order, OrderStatus
+from app.models.order import Order, OrderProduct, OrderStatus
 from app.models.user import User, UserRole
 from app.schemas.common import (
     FuneralHomeRef,
@@ -33,19 +33,44 @@ from app.services.order_service import OrderService
 router = APIRouter()
 
 
-def _order_products(order: Order) -> list[OrderProductResponse]:
+def _belongs_to_vendor(order_product: OrderProduct, vendor_id: Optional[UUID]) -> bool:
+    """True when this line's gift is currently associated with the vendor."""
+    if vendor_id is None or order_product.product is None:
+        return False
+    return any(
+        association.vendor_id == vendor_id
+        for association in order_product.product.vendor_associations
+    )
+
+
+def _order_product_response(
+    order_product: OrderProduct,
+    *,
+    include_base_price: bool = False,
+) -> OrderProductResponse:
+    return OrderProductResponse(
+        product_id=order_product.product_id,
+        product_name=order_product.product_name,
+        product_price=order_product.product_price,
+        base_price=order_product.base_price if include_base_price else None,
+        quantity=order_product.quantity,
+    )
+
+
+def _order_products(
+    order: Order,
+    vendor_id: Optional[UUID] = None,
+) -> list[OrderProductResponse]:
     return [
-        OrderProductResponse(
-            product_id=op.product_id,
-            product_name=op.product_name,
-            product_price=op.product_price,
-            quantity=op.quantity,
+        _order_product_response(
+            op,
+            include_base_price=_belongs_to_vendor(op, vendor_id),
         )
         for op in order.products
     ]
 
 
-def _build_response(order: Order) -> OrderResponse:
+def _build_response(order: Order, vendor_id: Optional[UUID] = None) -> OrderResponse:
     """Serialize an order with its gifts and enriched context blocks."""
     return OrderResponse(
         id=order.id,
@@ -58,7 +83,7 @@ def _build_response(order: Order) -> OrderResponse:
         currency=order.currency,
         created_at=order.created_at,
         paid_at=order.paid_at,
-        products=_order_products(order),
+        products=_order_products(order, vendor_id),
         visitor=UserRef.model_validate(order.visitor) if order.visitor else None,
         family_admin=(
             UserRef.model_validate(order.family_admin) if order.family_admin else None
@@ -83,12 +108,7 @@ async def _attach_vendor_context(
         response.id, vendor_id
     )
     response.vendor_products = [
-        OrderProductResponse(
-            product_id=op.product_id,
-            product_name=op.product_name,
-            product_price=op.product_price,
-            quantity=op.quantity,
-        )
+        _order_product_response(op, include_base_price=True)
         for op in vendor_products
     ]
     response.vendor_sales_amount = vendor_amount
@@ -156,7 +176,8 @@ async def list_orders(
     - DIRECTOR: only their own funeral home's orders
     - FAMILY_ADMIN: only orders on their own collections
     - VISITOR: only their own orders
-    - VENDOR: only orders containing their gifts, enriched with vendor totals
+    - VENDOR: only orders containing their gifts, enriched with vendor totals.
+      Each of the vendor's gifts includes base_price next to product_price.
     """
     order_service = OrderService(db)
 
@@ -207,12 +228,17 @@ async def list_orders(
         limit=pagination.limit,
     )
 
+    vendor_id = (
+        current_user.vendor_id
+        if current_user.role == UserRole.VENDOR.value and current_user.vendor_id
+        else None
+    )
     items = []
     for order in orders:
-        response = _build_response(order)
-        if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+        response = _build_response(order, vendor_id)
+        if vendor_id is not None:
             response = await _attach_vendor_context(
-                order_service, response, current_user.vendor_id
+                order_service, response, vendor_id
             )
         items.append(response)
 
@@ -237,7 +263,8 @@ async def get_order(
     - DIRECTOR: orders on collections in their funeral home
     - FAMILY_ADMIN: orders on their own collections
     - VISITOR: their own orders
-    - VENDOR: orders containing their gifts
+    - VENDOR: orders containing their gifts. Their gifts include base_price
+      next to product_price.
     """
     order_service = OrderService(db)
     order = await order_service.get_by_id(order_id, load_products=True)
@@ -288,11 +315,16 @@ async def get_order(
             detail="You do not have permission to view this order"
         )
     
-    response = _build_response(order)
-    
-    if current_user.role == UserRole.VENDOR.value and current_user.vendor_id:
+    vendor_id = (
+        current_user.vendor_id
+        if current_user.role == UserRole.VENDOR.value and current_user.vendor_id
+        else None
+    )
+    response = _build_response(order, vendor_id)
+
+    if vendor_id is not None:
         response = await _attach_vendor_context(
-            order_service, response, current_user.vendor_id
+            order_service, response, vendor_id
         )
     
     return response

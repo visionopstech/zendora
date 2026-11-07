@@ -160,6 +160,7 @@ async def test_order_service_create_order_creates_commission_snapshot_for_collec
         id=uuid4(),
         name="Car seat",
         price=Decimal("20.00"),
+        base_price=Decimal("10.00"),
     )
 
     order = await service.create_order(
@@ -174,7 +175,9 @@ async def test_order_service_create_order_creates_commission_snapshot_for_collec
     assert order.total_amount == Decimal("20.00")
     assert order.funeral_home_id == collection.funeral_home_id
     assert any(isinstance(item, Order) for item in db.added)
-    assert any(isinstance(item, OrderProduct) for item in db.added)
+    saved_product = next(item for item in db.added if isinstance(item, OrderProduct))
+    assert saved_product.product_price == Decimal("20.00")
+    assert saved_product.base_price == Decimal("10.00")
     financial_service.get_funeral_home_profit_percentage.assert_awaited_once_with(
         collection.funeral_home_id
     )
@@ -209,7 +212,12 @@ async def test_order_service_create_order_without_home_uses_zero_director_profit
     monkeypatch.setattr(order_service_module, "FinancialService", lambda _: financial_service)
 
     service = OrderService(db)
-    product = SimpleNamespace(id=uuid4(), name="Car seat", price=Decimal("20.00"))
+    product = SimpleNamespace(
+        id=uuid4(),
+        name="Car seat",
+        price=Decimal("20.00"),
+        base_price=Decimal("10.00"),
+    )
 
     order = await service.create_order(
         visitor_id=uuid4(),
@@ -253,7 +261,12 @@ async def test_order_service_create_order_uses_funeral_home_rate_without_directo
     monkeypatch.setattr(order_service_module, "FinancialService", lambda _: financial_service)
 
     service = OrderService(db)
-    product = SimpleNamespace(id=uuid4(), name="Car seat", price=Decimal("20.00"))
+    product = SimpleNamespace(
+        id=uuid4(),
+        name="Car seat",
+        price=Decimal("20.00"),
+        base_price=Decimal("10.00"),
+    )
 
     order = await service.create_order(
         visitor_id=uuid4(),

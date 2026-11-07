@@ -28,6 +28,8 @@ class OrderProductResponse(BaseModel):
     product_id: UUID
     product_name: str
     product_price: Decimal
+    # Vendor wholesale snapshot. Set only for the requesting vendor's own gifts.
+    base_price: Optional[Decimal] = None
     quantity: int
 
 
