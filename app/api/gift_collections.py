@@ -153,6 +153,9 @@ async def create_gift_collection(
     
     Pass `default_collection_id` to copy a default collection; any field sent
     explicitly overrides the copied value.
+    
+    `public_slug` is required and becomes the public URL of the collection.
+    It must be unique across the system; a taken slug returns 409.
     """
     collection_service = GiftCollectionService(db)
     default_service = DefaultGiftCollectionService(db)
@@ -233,6 +236,7 @@ async def create_gift_collection(
 
             collection = await collection_service.create_from_default_collection(
                 family_admin_id=family_admin_id,
+                public_slug=collection_data.public_slug,
                 director_id=director_id,
                 funeral_home_id=funeral_home_id,
                 source_default_collection_id=default_collection.id,
@@ -254,6 +258,7 @@ async def create_gift_collection(
         elif products:
             collection = await collection_service.create_with_products(
                 family_admin_id=family_admin_id,
+                public_slug=collection_data.public_slug,
                 director_id=director_id,
                 funeral_home_id=funeral_home_id,
                 products=products,
@@ -268,6 +273,7 @@ async def create_gift_collection(
         else:
             collection = await collection_service.create(
                 family_admin_id=family_admin_id,
+                public_slug=collection_data.public_slug,
                 director_id=director_id,
                 funeral_home_id=funeral_home_id,
                 title=collection_data.title,
@@ -389,7 +395,13 @@ async def update_gift_collection(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update a gift collection's content and customization."""
+    """
+    Update a gift collection's content and customization.
+    
+    `public_slug` may be changed here; it must stay unique across the system
+    (a taken slug returns 409). Changing it changes the public URL, so any
+    previously shared links and QR codes stop working.
+    """
     service = GiftCollectionService(db)
     await _load_collection(service, gift_collection_id, current_user)
 
@@ -409,6 +421,7 @@ async def update_gift_collection(
             primary_color=collection_data.primary_color,
             secondary_color=collection_data.secondary_color,
             delivery_address=delivery_address,
+            public_slug=collection_data.public_slug,
         )
         await db.commit()
 
@@ -416,6 +429,8 @@ async def update_gift_collection(
         return _build_response(collection)
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
 @router.put("/{gift_collection_id}/products", response_model=GiftCollectionResponse)

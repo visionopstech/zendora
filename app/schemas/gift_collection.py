@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
@@ -39,7 +40,52 @@ class GiftCollectionProductInput(BaseModel):
     quantity: int = Field(default=1, ge=1)
 
 
-class GiftCollectionCreate(GiftCollectionBase):
+PUBLIC_SLUG_PATTERN = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+PUBLIC_SLUG_DESCRIPTION = (
+    "Public URL slug for the collection. Lowercase letters, numbers and "
+    "hyphens only; must be unique across the system."
+)
+
+
+def _normalize_public_slug(value):
+    """Trim and lowercase a slug before validation."""
+    if isinstance(value, str):
+        value = value.strip().lower()
+    return value
+
+
+def _check_public_slug(value: Optional[str]) -> Optional[str]:
+    """Reject slugs that would not make a clean public URL."""
+    if value is not None and not PUBLIC_SLUG_PATTERN.fullmatch(value):
+        raise ValueError(
+            'Public slug may only contain lowercase letters, numbers and hyphens, '
+            'and cannot start or end with a hyphen'
+        )
+    return value
+
+
+class PublicSlugField(BaseModel):
+    """Mixin providing a validated, user-chosen public slug."""
+    public_slug: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        description=PUBLIC_SLUG_DESCRIPTION,
+    )
+
+    @field_validator('public_slug', mode='before')
+    @classmethod
+    def normalize_public_slug(cls, value):
+        return _normalize_public_slug(value)
+
+    @field_validator('public_slug')
+    @classmethod
+    def validate_public_slug(cls, value: str) -> str:
+        return _check_public_slug(value)
+
+
+class GiftCollectionCreate(GiftCollectionBase, PublicSlugField):
     """Schema for a director or super admin creating a collection for a family."""
     family_admin_email: str
     family_admin_first_name: str
@@ -54,7 +100,7 @@ class GiftCollectionCreate(GiftCollectionBase):
     )
 
 
-class GiftCollectionCreateByFamilyAdmin(GiftCollectionBase):
+class GiftCollectionCreateByFamilyAdmin(GiftCollectionBase, PublicSlugField):
     """Schema for a family admin creating their own collection."""
     default_collection_id: Optional[UUID] = Field(
         None,
@@ -75,6 +121,22 @@ class GiftCollectionUpdate(BaseModel):
     primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     secondary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     delivery_address: Optional[DeliveryAddress] = None
+    public_slug: Optional[str] = Field(
+        None,
+        min_length=3,
+        max_length=100,
+        description=PUBLIC_SLUG_DESCRIPTION,
+    )
+
+    @field_validator('public_slug', mode='before')
+    @classmethod
+    def normalize_public_slug(cls, value):
+        return _normalize_public_slug(value)
+
+    @field_validator('public_slug')
+    @classmethod
+    def validate_public_slug(cls, value: Optional[str]) -> Optional[str]:
+        return _check_public_slug(value)
 
 
 class GiftInCollection(BaseModel):

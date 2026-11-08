@@ -128,6 +128,7 @@ async def test_create_from_default_uses_defaults_when_not_overridden():
 
     result = await service.create_from_default_collection(
         family_admin_id=uuid4(),
+        public_slug="template-copy",
         director_id=uuid4(),
         default_collection_data={
             "title": "Template title",
@@ -168,6 +169,7 @@ async def test_create_from_default_allows_explicit_empty_product_override():
 
     result = await service.create_from_default_collection(
         family_admin_id=uuid4(),
+        public_slug="template-copy",
         director_id=uuid4(),
         default_collection_data={
             "title": "Template title",
@@ -723,6 +725,7 @@ async def test_director_can_create_collection_from_default(monkeypatch):
             family_admin_last_name=family_admin.last_name,
             default_collection_id=default_collection.id,
             title="Director override",
+            public_slug="template-copy",
         ),
         background_tasks=background_tasks,
         db=db,
@@ -769,6 +772,7 @@ async def test_family_admin_can_create_manual_collection_with_products(monkeypat
     response = await gift_collections_api.create_gift_collection(
         collection_data=GiftCollectionCreateByFamilyAdmin(
             title="Manual collection",
+            public_slug="manual-collection",
             products=[{"product_id": uuid4(), "quantity": 1}],
         ),
         background_tasks=BackgroundTasks(),
@@ -812,6 +816,7 @@ async def test_family_admin_without_director_can_create_collection(monkeypatch):
     response = await gift_collections_api.create_gift_collection(
         collection_data=GiftCollectionCreateByFamilyAdmin(
             title="Unassigned collection",
+            public_slug="unassigned-collection",
             products=[{"product_id": uuid4(), "quantity": 1}],
         ),
         background_tasks=BackgroundTasks(),

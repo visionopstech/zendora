@@ -1,5 +1,3 @@
-import secrets
-import string
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, or_, select, update
@@ -27,22 +25,19 @@ class GiftCollectionService:
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    def _generate_slug(self, length: int = 12) -> str:
-        """Generate a random URL-safe slug."""
-        chars = string.ascii_lowercase + string.digits
-        return ''.join(secrets.choice(chars) for _ in range(length))
+    async def is_slug_available(self, public_slug: str) -> bool:
+        """Check whether a public slug is not taken by any collection."""
+        result = await self.db.execute(
+            select(GiftCollection.id).where(GiftCollection.public_slug == public_slug)
+        )
+        return result.scalar_one_or_none() is None
     
-    async def _ensure_unique_slug(self) -> str:
-        """Generate a unique slug for a gift collection."""
-        max_attempts = 10
-        for _ in range(max_attempts):
-            slug = self._generate_slug()
-            result = await self.db.execute(
-                select(GiftCollection).where(GiftCollection.public_slug == slug)
+    async def _assert_slug_available(self, public_slug: str) -> None:
+        """Raise a conflict when the requested public slug is already taken."""
+        if not await self.is_slug_available(public_slug):
+            raise ConflictError(
+                "This public slug is already taken. Please choose another one."
             )
-            if not result.scalar_one_or_none():
-                return slug
-        raise Exception("Failed to generate unique slug")
     
     def _default_options(self, load_products: bool = False) -> list:
         """Eager-load options shared by every read path."""
@@ -216,6 +211,7 @@ class GiftCollectionService:
     async def create(
         self,
         family_admin_id: UUID,
+        public_slug: str,
         director_id: Optional[UUID] = None,
         funeral_home_id: Optional[UUID] = None,
         source_default_collection_id: Optional[UUID] = None,
@@ -227,17 +223,17 @@ class GiftCollectionService:
         secondary_color: Optional[str] = None,
         delivery_address: Optional[dict] = None
     ) -> GiftCollection:
-        """Create a new gift collection."""
+        """Create a new gift collection with a user-chosen public slug."""
         if director_id:
             await self._assert_director_collection_limit(director_id)
-        slug = await self._ensure_unique_slug()
+        await self._assert_slug_available(public_slug)
         
         collection = GiftCollection(
             family_admin_id=family_admin_id,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             source_default_collection_id=source_default_collection_id,
-            public_slug=slug,
+            public_slug=public_slug,
             status=GiftCollectionStatus.PUBLISHED.value,
             published_at=datetime.utcnow(),
             title=title,
@@ -258,6 +254,7 @@ class GiftCollectionService:
     async def create_from_default_collection(
         self,
         family_admin_id: UUID,
+        public_slug: str,
         director_id: Optional[UUID],
         default_collection_data: dict,
         overrides: dict,
@@ -280,6 +277,7 @@ class GiftCollectionService:
 
         return await self._create_from_payload(
             family_admin_id=family_admin_id,
+            public_slug=public_slug,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             source_default_collection_id=source_default_collection_id,
@@ -295,7 +293,8 @@ class GiftCollectionService:
         header_image_url: Optional[str] = None,
         primary_color: Optional[str] = None,
         secondary_color: Optional[str] = None,
-        delivery_address: Optional[dict] = None
+        delivery_address: Optional[dict] = None,
+        public_slug: Optional[str] = None
     ) -> GiftCollection:
         """Update a gift collection."""
         collection = await self.get_by_id(gift_collection_id)
@@ -303,6 +302,9 @@ class GiftCollectionService:
         if not collection:
             raise NotFoundException("Gift collection not found")
         
+        if public_slug is not None and public_slug != collection.public_slug:
+            await self._assert_slug_available(public_slug)
+            collection.public_slug = public_slug
         if title is not None:
             collection.title = title
         if description is not None:
@@ -426,6 +428,7 @@ class GiftCollectionService:
     async def create_with_products(
         self,
         family_admin_id: UUID,
+        public_slug: str,
         director_id: Optional[UUID],
         products: List[dict],
         funeral_home_id: Optional[UUID] = None,
@@ -441,6 +444,7 @@ class GiftCollectionService:
         """Create a new collection and add gifts in one operation."""
         collection = await self.create(
             family_admin_id=family_admin_id,
+            public_slug=public_slug,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             source_default_collection_id=source_default_collection_id,
@@ -501,6 +505,7 @@ class GiftCollectionService:
     async def _create_from_payload(
         self,
         family_admin_id: UUID,
+        public_slug: str,
         director_id: Optional[UUID],
         payload: dict[str, Any],
         funeral_home_id: Optional[UUID] = None,
@@ -513,6 +518,7 @@ class GiftCollectionService:
         if products:
             return await self.create_with_products(
                 family_admin_id=family_admin_id,
+                public_slug=public_slug,
                 director_id=director_id,
                 funeral_home_id=funeral_home_id,
                 source_default_collection_id=source_default_collection_id,
@@ -528,6 +534,7 @@ class GiftCollectionService:
 
         return await self.create(
             family_admin_id=family_admin_id,
+            public_slug=public_slug,
             director_id=director_id,
             funeral_home_id=funeral_home_id,
             source_default_collection_id=source_default_collection_id,

@@ -159,6 +159,7 @@ async def test_create_rejects_sixth_collection_for_director():
     with pytest.raises(ConflictError) as exc:
         await service.create(
             family_admin_id=uuid4(),
+            public_slug="memorial-smith",
             director_id=uuid4(),
         )
 
@@ -188,15 +189,72 @@ async def test_publish_rejects_fourth_published_collection_for_director():
 async def test_create_without_director_skips_director_collection_limit():
     service = GiftCollectionService(AsyncMock())
     service.count_by_director = AsyncMock(return_value=MAX_COLLECTIONS_PER_DIRECTOR)
-    service._ensure_unique_slug = AsyncMock(return_value="slug123abcde")
+    service._assert_slug_available = AsyncMock(return_value=None)
     service.db.add = lambda _collection: None
     service.db.flush = AsyncMock()
     service.db.refresh = AsyncMock()
 
-    collection = await service.create(family_admin_id=uuid4(), director_id=None)
+    collection = await service.create(
+        family_admin_id=uuid4(), public_slug="memorial-smith", director_id=None
+    )
 
     service.count_by_director.assert_not_awaited()
     assert collection.director_id is None
+
+
+def make_slug_collection(public_slug="old-slug"):
+    return SimpleNamespace(
+        id=uuid4(),
+        family_admin_id=uuid4(),
+        director_id=None,
+        public_slug=public_slug,
+        status=GiftCollectionStatus.PUBLISHED.value,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_changes_public_slug_when_available():
+    collection = make_slug_collection()
+    service = GiftCollectionService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=collection)
+    service._assert_slug_available = AsyncMock(return_value=None)
+    service.db.flush = AsyncMock()
+    service.db.refresh = AsyncMock()
+
+    updated = await service.update(collection.id, public_slug="new-slug")
+
+    service._assert_slug_available.assert_awaited_once_with("new-slug")
+    assert updated.public_slug == "new-slug"
+
+
+@pytest.mark.asyncio
+async def test_update_keeps_slug_and_skips_check_when_unchanged():
+    collection = make_slug_collection(public_slug="same-slug")
+    service = GiftCollectionService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=collection)
+    service._assert_slug_available = AsyncMock()
+    service.db.flush = AsyncMock()
+    service.db.refresh = AsyncMock()
+
+    updated = await service.update(collection.id, public_slug="same-slug")
+
+    service._assert_slug_available.assert_not_awaited()
+    assert updated.public_slug == "same-slug"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_taken_public_slug():
+    collection = make_slug_collection()
+    service = GiftCollectionService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=collection)
+    service._assert_slug_available = AsyncMock(
+        side_effect=ConflictError("This public slug is already taken.")
+    )
+
+    with pytest.raises(ConflictError):
+        await service.update(collection.id, public_slug="taken-slug")
+
+    assert collection.public_slug == "old-slug"
 
 
 @pytest.mark.asyncio
