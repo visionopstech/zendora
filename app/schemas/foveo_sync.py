@@ -68,6 +68,17 @@ class FoveoFuneralHomeBlock(BaseModel):
     is_active: bool = True
 
 
+class FoveoCollectionBlock(BaseModel):
+    """
+    Optional hints for the gift collection Zendora creates for a stream.
+
+    The block is never required: on a stream event Zendora creates the
+    collection whenever the family is applied. Zendora always picks the slug.
+    """
+
+    default_collection_id: Optional[UUID] = None
+
+
 class FoveoSyncRequest(BaseModel):
     """Single payload shape for every Foveo event."""
 
@@ -78,6 +89,7 @@ class FoveoSyncRequest(BaseModel):
     main_director: Optional[FoveoUserBlock] = None
     stream_director: Optional[FoveoUserBlock] = None
     family: Optional[FoveoFamilyBlock] = None
+    collection: Optional[FoveoCollectionBlock] = None
 
 
 class FoveoSyncEntityResult(BaseModel):
@@ -88,6 +100,12 @@ class FoveoSyncEntityResult(BaseModel):
     detail: Optional[str] = None
 
 
+class FoveoCollectionResult(FoveoSyncEntityResult):
+    """Outcome for the gift collection of a stream."""
+
+    public_slug: Optional[str] = None
+
+
 class FoveoSyncResponse(BaseModel):
     """Per-entity results. Missing keys mean that block was not in the event."""
 
@@ -95,3 +113,4 @@ class FoveoSyncResponse(BaseModel):
     main_director: Optional[FoveoSyncEntityResult] = None
     stream_director: Optional[FoveoSyncEntityResult] = None
     family: Optional[FoveoSyncEntityResult] = None
+    collection: Optional[FoveoCollectionResult] = None

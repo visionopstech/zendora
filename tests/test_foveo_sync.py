@@ -22,9 +22,11 @@ from app.core.exceptions import PermissionDenied
 from app.core.security import hash_password, verify_password
 from app.models.foveo_sync_event import FoveoSyncEvent
 from app.models.funeral_home import FuneralHome
+from app.models.gift_collection import GiftCollection, GiftCollectionStatus
 from app.models.user import User, UserRole
 from app.schemas.foveo_sync import (
     FoveoAddress,
+    FoveoCollectionBlock,
     FoveoEntityStatus,
     FoveoEventType,
     FoveoFamilyBlock,
@@ -33,7 +35,13 @@ from app.schemas.foveo_sync import (
     FoveoUserBlock,
 )
 from app.services.auth_service import AuthService
+from app.services.default_gift_collection_service import DefaultGiftCollectionService
 from app.services.foveo_sync_service import FoveoSyncService
+from app.services.gift_collection_service import (
+    GiftCollectionService,
+    MAX_COLLECTIONS_PER_DIRECTOR,
+    MAX_PUBLISHED_PER_DIRECTOR,
+)
 from app.services.user_management_service import UserManagementService
 from app.services.user_service import UserService
 from app.utils.foveo import FOVEO_PASSWORD_MANAGED_MESSAGE, is_placeholder_email
@@ -94,11 +102,23 @@ class FakeResult:
         return self._row
 
 
+class _FakeNested:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 class FakeSession:
     def __init__(self):
         self.users = []
         self.funeral_homes = []
         self.events = []
+        self.collections = []
+
+    def begin_nested(self):
+        return _FakeNested()
 
     def add(self, obj):
         if isinstance(obj, User) and obj not in self.users:
@@ -219,8 +239,92 @@ def _payload(**kwargs):
     return FoveoSyncRequest(**data)
 
 
-def _service():
-    return FoveoSyncService(FakeSession())
+class FakeCollectionService(GiftCollectionService):
+    """In-memory collections; keeps the real limit and slug logic."""
+
+    def __init__(self, store):
+        super().__init__(db=None)
+        self.store = store
+
+    async def get_by_foveo_stream_id(self, foveo_stream_id):
+        return next((c for c in self.store if c.foveo_stream_id == foveo_stream_id), None)
+
+    async def get_published_by_family_admin(self, family_admin_id):
+        return next(
+            (
+                c
+                for c in self.store
+                if c.family_admin_id == family_admin_id
+                and c.status == GiftCollectionStatus.PUBLISHED.value
+            ),
+            None,
+        )
+
+    async def count_by_director(self, director_id, status=None):
+        return len(
+            [
+                c
+                for c in self.store
+                if c.director_id == director_id and (status is None or c.status == status)
+            ]
+        )
+
+    async def is_slug_available(self, public_slug):
+        return all(c.public_slug != public_slug for c in self.store)
+
+    async def create_from_default_collection(self, **kwargs):
+        collection = GiftCollection(
+            id=uuid4(),
+            family_admin_id=kwargs["family_admin_id"],
+            director_id=kwargs["director_id"],
+            funeral_home_id=kwargs["funeral_home_id"],
+            source_default_collection_id=kwargs["source_default_collection_id"],
+            public_slug=kwargs["public_slug"],
+            status=GiftCollectionStatus.PUBLISHED.value,
+        )
+        self.store.append(collection)
+        return collection
+
+
+class FakeDefaultService(DefaultGiftCollectionService):
+    def __init__(self, available):
+        super().__init__(db=None)
+        self.available = available
+
+    async def resolve_for_user(self, user, active_only=True, load_products=True):
+        return list(self.available)
+
+    async def get_by_id(self, default_collection_id, load_products=False):
+        return next((d for d in self.available if d.id == default_collection_id), None)
+
+    async def is_applicable_to_user(self, user, default_collection):
+        return default_collection in self.available
+
+
+def _default_collection(**kwargs):
+    data = dict(
+        id=uuid4(),
+        is_active=True,
+        collection_title="In loving memory",
+        collection_description="Send flowers",
+        logo_url=None,
+        header_image_url=None,
+        primary_color=None,
+        secondary_color=None,
+        delivery_address=None,
+        products=[],
+    )
+    data.update(kwargs)
+    return SimpleNamespace(**data)
+
+
+def _service(with_default=True):
+    service = FoveoSyncService(FakeSession())
+    service.collections = FakeCollectionService(service.db.collections)
+    service.defaults = FakeDefaultService(
+        [_default_collection()] if with_default else []
+    )
+    return service
 
 
 def test_django_hash_verifies_and_bcrypt_still_works():
@@ -641,3 +745,244 @@ async def test_forgot_password_skips_foveo_linked_user(monkeypatch):
     )
     assert result.debug_token is None
     assert tasks.tasks == []
+
+
+# ---------------------------------------------------------------------------
+# Stream -> gift collection
+# ---------------------------------------------------------------------------
+
+
+def _stream_payload(**kwargs):
+    data = dict(
+        stream_director=_director_block(
+            foveo_user_id=11, email="stream@acme.com", first_name="Alex"
+        ),
+        family=_family_block(),
+    )
+    data.update(kwargs)
+    return _payload(**data)
+
+
+@pytest.mark.asyncio
+async def test_stream_creates_collection_from_default_with_random_slug():
+    service = _service()
+    default = service.defaults.available[0]
+    result = await service.sync(_stream_payload())
+
+    assert result.collection.status == FoveoEntityStatus.CREATED
+    assert result.collection.public_slug
+    assert len(result.collection.public_slug) >= 3
+    collection = service.db.collections[0]
+    stream = next(u for u in service.db.users if u.foveo_user_id == 11)
+    family = next(u for u in service.db.users if u.foveo_user_id == 12)
+    assert collection.id == result.collection.id
+    assert collection.foveo_stream_id == 123
+    assert collection.family_admin_id == family.id
+    assert collection.director_id == stream.id
+    assert collection.funeral_home_id == service.db.funeral_homes[0].id
+    assert collection.source_default_collection_id == default.id
+
+
+@pytest.mark.asyncio
+async def test_collection_slugs_are_random_and_valid():
+    from app.schemas.gift_collection import PUBLIC_SLUG_PATTERN
+
+    service = _service()
+    slugs = {await service.collections.generate_unique_public_slug() for _ in range(20)}
+    assert len(slugs) == 20
+    assert all(PUBLIC_SLUG_PATTERN.fullmatch(s) and 3 <= len(s) <= 100 for s in slugs)
+
+
+@pytest.mark.asyncio
+async def test_same_stream_again_is_unchanged_not_duplicated():
+    service = _service()
+    first = await service.sync(_stream_payload())
+    second = await service.sync(
+        _stream_payload(event_id=uuid4(), event=FoveoEventType.STREAM_UPDATED)
+    )
+    assert second.collection.status == FoveoEntityStatus.UNCHANGED
+    assert second.collection.id == first.collection.id
+    assert second.collection.public_slug == first.collection.public_slug
+    assert len(service.db.collections) == 1
+
+
+@pytest.mark.asyncio
+async def test_replaced_stream_director_moves_the_collection():
+    service = _service()
+    await service.sync(_stream_payload())
+    result = await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            stream_director=_director_block(foveo_user_id=30, email="new@acme.com"),
+            family=_family_block(),
+        )
+    )
+    new_director = next(u for u in service.db.users if u.foveo_user_id == 30)
+    assert result.collection.status == FoveoEntityStatus.UPDATED
+    assert service.db.collections[0].director_id == new_director.id
+    assert len(service.db.collections) == 1
+
+
+@pytest.mark.asyncio
+async def test_family_with_published_collection_is_conflict():
+    service = _service()
+    await service.sync(_stream_payload(foveo_stream_id=123))
+    second = await service.sync(
+        _stream_payload(event_id=uuid4(), foveo_stream_id=124)
+    )
+    assert second.collection.status == FoveoEntityStatus.CONFLICT
+    assert second.collection.id == service.db.collections[0].id
+    assert second.collection.public_slug == service.db.collections[0].public_slug
+    assert len(service.db.collections) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_collection_owned_by_other_family_is_not_reassigned():
+    service = _service()
+    await service.sync(_stream_payload())
+    result = await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            family=_family_block(foveo_user_id=99, email="other@example.com"),
+        )
+    )
+    original = service.db.collections[0]
+    other = next(u for u in service.db.users if u.foveo_user_id == 99)
+    assert result.collection.status == FoveoEntityStatus.CONFLICT
+    assert result.collection.id == original.id
+    assert original.family_admin_id != other.id
+
+
+@pytest.mark.asyncio
+async def test_director_total_limit_blocks_new_collection():
+    service = _service()
+    director_id = uuid4()
+    for index in range(MAX_COLLECTIONS_PER_DIRECTOR):
+        service.db.collections.append(
+            GiftCollection(
+                id=uuid4(),
+                family_admin_id=uuid4(),
+                director_id=director_id,
+                public_slug=f"seed-{index}",
+                status=GiftCollectionStatus.DRAFT.value,
+            )
+        )
+    stream_director = _director_block(foveo_user_id=11, email="stream@acme.com")
+    await service.sync(_payload(stream_director=stream_director))
+    stream = next(u for u in service.db.users if u.foveo_user_id == 11)
+    for collection in service.db.collections:
+        collection.director_id = stream.id
+
+    result = await service.sync(
+        _stream_payload(event_id=uuid4(), stream_director=stream_director)
+    )
+    assert result.collection.status == FoveoEntityStatus.CONFLICT
+    assert "at most" in result.collection.detail
+    assert len(service.db.collections) == MAX_COLLECTIONS_PER_DIRECTOR
+
+
+@pytest.mark.asyncio
+async def test_director_published_limit_blocks_new_collection():
+    service = _service()
+    stream_director = _director_block(foveo_user_id=11, email="stream@acme.com")
+    await service.sync(_payload(stream_director=stream_director))
+    stream = next(u for u in service.db.users if u.foveo_user_id == 11)
+    for index in range(MAX_PUBLISHED_PER_DIRECTOR):
+        service.db.collections.append(
+            GiftCollection(
+                id=uuid4(),
+                family_admin_id=uuid4(),
+                director_id=stream.id,
+                public_slug=f"seed-{index}",
+                status=GiftCollectionStatus.PUBLISHED.value,
+            )
+        )
+    result = await service.sync(
+        _stream_payload(event_id=uuid4(), stream_director=stream_director)
+    )
+    assert result.collection.status == FoveoEntityStatus.CONFLICT
+    assert "published" in result.collection.detail
+    assert len(service.db.collections) == MAX_PUBLISHED_PER_DIRECTOR
+
+
+@pytest.mark.asyncio
+async def test_no_default_collection_skips_collection_but_keeps_users():
+    service = _service(with_default=False)
+    result = await service.sync(_stream_payload())
+    assert result.family.status == FoveoEntityStatus.CREATED
+    assert result.collection.status == FoveoEntityStatus.SKIPPED
+    assert result.collection.id is None
+    assert service.db.collections == []
+
+
+@pytest.mark.asyncio
+async def test_requested_default_collection_is_used_when_applicable():
+    service = _service()
+    chosen = _default_collection(collection_title="Chosen")
+    service.defaults.available.append(chosen)
+    result = await service.sync(
+        _stream_payload(collection=FoveoCollectionBlock(default_collection_id=chosen.id))
+    )
+    assert result.collection.status == FoveoEntityStatus.CREATED
+    assert service.db.collections[0].source_default_collection_id == chosen.id
+
+
+@pytest.mark.asyncio
+async def test_requested_default_collection_not_available_is_skipped():
+    service = _service()
+    result = await service.sync(
+        _stream_payload(collection=FoveoCollectionBlock(default_collection_id=uuid4()))
+    )
+    assert result.collection.status == FoveoEntityStatus.SKIPPED
+    assert service.db.collections == []
+
+
+@pytest.mark.asyncio
+async def test_placeholder_family_skips_collection():
+    service = _service()
+    result = await service.sync(
+        _stream_payload(family=_family_block(email="family_abcde@foveo.org"))
+    )
+    assert result.family.status == FoveoEntityStatus.SKIPPED_PLACEHOLDER_EMAIL
+    assert result.collection.status == FoveoEntityStatus.SKIPPED
+    assert service.db.collections == []
+
+
+@pytest.mark.asyncio
+async def test_missing_stream_id_skips_collection():
+    service = _service()
+    result = await service.sync(
+        _stream_payload(event=FoveoEventType.MANUAL, foveo_stream_id=None)
+    )
+    assert result.family.status == FoveoEntityStatus.CREATED
+    assert result.collection.status == FoveoEntityStatus.SKIPPED
+    assert service.db.collections == []
+
+
+@pytest.mark.asyncio
+async def test_no_family_means_no_collection_block():
+    service = _service()
+    result = await service.sync(_payload())
+    assert result.collection is None
+
+
+@pytest.mark.asyncio
+async def test_funeral_home_updated_never_creates_collection():
+    service = _service()
+    result = await service.sync(
+        _stream_payload(event=FoveoEventType.FUNERAL_HOME_UPDATED, foveo_stream_id=None)
+    )
+    assert result.collection is None
+    assert service.db.collections == []
+
+
+@pytest.mark.asyncio
+async def test_replayed_event_does_not_create_second_collection():
+    service = _service()
+    payload = _stream_payload()
+    first = await service.sync(payload)
+    second = await service.sync(payload)
+    assert second.model_dump() == first.model_dump()
+    assert len(service.db.collections) == 1

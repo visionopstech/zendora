@@ -7,12 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import ValidationError
+from app.core.exceptions import ConflictError, NotFoundException, ValidationError
 from app.models.foveo_sync_event import FoveoSyncEvent
 from app.models.funeral_home import FuneralHome
+from app.models.gift_collection import GiftCollection, GiftCollectionStatus
 from app.models.user import User, UserRole
 from app.schemas.foveo_sync import (
     FoveoAddress,
+    FoveoCollectionResult,
     FoveoEntityStatus,
     FoveoEventType,
     FoveoFamilyBlock,
@@ -22,6 +24,8 @@ from app.schemas.foveo_sync import (
     FoveoSyncResponse,
     FoveoUserBlock,
 )
+from app.services.default_gift_collection_service import DefaultGiftCollectionService
+from app.services.gift_collection_service import GiftCollectionService
 from app.utils.foveo import is_placeholder_email, normalize_password_hash
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,8 @@ class FoveoSyncService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.collections = GiftCollectionService(db)
+        self.defaults = DefaultGiftCollectionService(db)
 
     async def sync(self, payload: FoveoSyncRequest) -> FoveoSyncResponse:
         existing = await self._get_event(payload.event_id)
@@ -113,6 +119,8 @@ class FoveoSyncService:
                         assign_main=False,
                     )
 
+        family_user: Optional[User] = None
+
         if payload.event in _STREAM_PERSON_EVENTS or (
             payload.event == FoveoEventType.USER_UPDATED and payload.family is not None
         ):
@@ -128,15 +136,198 @@ class FoveoSyncService:
                     or response.main_director.status in _APPLIED_STATUSES
                 ):
                     director_id = main_user.id
-                response.family, _ = await self._upsert_family(
+                response.family, family_user = await self._upsert_family(
                     payload.family,
                     funeral_home=funeral_home if process_home else None,
                     director_id=director_id,
                     allow_create=allow_create,
                 )
 
+        if payload.event in _STREAM_PERSON_EVENTS and payload.family is not None:
+            response.collection = await self._sync_collection(
+                payload,
+                funeral_home=funeral_home,
+                family_user=family_user,
+                family_result=response.family,
+            )
+
         await self._record_event(payload, response)
         return response
+
+    async def _sync_collection(
+        self,
+        payload: FoveoSyncRequest,
+        *,
+        funeral_home: Optional[FuneralHome],
+        family_user: Optional[User],
+        family_result: Optional[FoveoSyncEntityResult],
+    ) -> FoveoCollectionResult:
+        """
+        Ensure the stream has exactly one gift collection, owned by its family.
+
+        Created from a default collection with a random slug. Never deletes or
+        re-owns a collection; an existing one only follows its director.
+        """
+        if (
+            family_user is None
+            or family_result is None
+            or family_result.status not in _APPLIED_STATUSES
+        ):
+            return _collection_result(
+                FoveoEntityStatus.SKIPPED,
+                detail="The family user was not applied, so no collection was created",
+            )
+        stream_id = payload.foveo_stream_id
+        if stream_id is None:
+            return _collection_result(
+                FoveoEntityStatus.SKIPPED,
+                detail="foveo_stream_id is required to create a collection",
+            )
+
+        director_id = family_user.director_id
+        funeral_home_id = (
+            funeral_home.id if funeral_home is not None else family_user.funeral_home_id
+        )
+
+        existing = await self.collections.get_by_foveo_stream_id(stream_id)
+        if existing is not None:
+            return await self._follow_stream_collection(
+                existing,
+                family_user=family_user,
+                director_id=director_id,
+                funeral_home_id=funeral_home_id,
+            )
+
+        published = await self.collections.get_published_by_family_admin(family_user.id)
+        if published is not None:
+            return _collection_result(
+                FoveoEntityStatus.CONFLICT,
+                id=published.id,
+                public_slug=published.public_slug,
+                detail=(
+                    "The family already has a published collection; "
+                    "no new collection was created"
+                ),
+            )
+
+        default_collection, skipped = await self._pick_default_collection(
+            payload, family_user
+        )
+        if default_collection is None:
+            return skipped
+
+        if director_id is not None:
+            try:
+                await self.collections.assert_director_capacity(director_id)
+            except ConflictError as exc:
+                return _collection_result(FoveoEntityStatus.CONFLICT, detail=exc.message)
+
+        public_slug = await self.collections.generate_unique_public_slug()
+        try:
+            async with self.db.begin_nested():
+                collection = await self.collections.create_from_default_collection(
+                    family_admin_id=family_user.id,
+                    public_slug=public_slug,
+                    director_id=director_id,
+                    funeral_home_id=funeral_home_id,
+                    source_default_collection_id=default_collection.id,
+                    default_collection_data=self.defaults.build_collection_payload(
+                        default_collection
+                    ),
+                    overrides={},
+                    override_fields=set(),
+                )
+                collection.foveo_stream_id = stream_id
+                await self.db.flush()
+        except NotFoundException as exc:
+            return _collection_result(
+                FoveoEntityStatus.SKIPPED,
+                detail=f"The default collection could not be copied: {exc.message}",
+            )
+        except ConflictError as exc:
+            return _collection_result(FoveoEntityStatus.CONFLICT, detail=exc.message)
+
+        return _collection_result(
+            FoveoEntityStatus.CREATED, id=collection.id, public_slug=collection.public_slug
+        )
+
+    async def _pick_default_collection(
+        self, payload: FoveoSyncRequest, family_user: User
+    ) -> tuple[Optional[object], Optional[FoveoCollectionResult]]:
+        """The default to copy, or a skipped result explaining why there is none."""
+        requested = payload.collection.default_collection_id if payload.collection else None
+        if requested is not None:
+            default_collection = await self.defaults.get_by_id(requested, load_products=True)
+            if (
+                default_collection is None
+                or not default_collection.is_active
+                or not await self.defaults.is_applicable_to_user(
+                    family_user, default_collection
+                )
+            ):
+                return None, _collection_result(
+                    FoveoEntityStatus.SKIPPED,
+                    detail="default_collection_id is not available to this family",
+                )
+            return default_collection, None
+
+        available = await self.defaults.resolve_for_user(
+            family_user, active_only=True, load_products=True
+        )
+        if not available:
+            return None, _collection_result(
+                FoveoEntityStatus.SKIPPED,
+                detail="No default gift collection is available to copy",
+            )
+        return available[0], None
+
+    async def _follow_stream_collection(
+        self,
+        collection: GiftCollection,
+        *,
+        family_user: User,
+        director_id: Optional[UUID],
+        funeral_home_id: Optional[UUID],
+    ) -> FoveoCollectionResult:
+        """Keep an existing stream collection's director and funeral home in step."""
+        if collection.family_admin_id != family_user.id:
+            return _collection_result(
+                FoveoEntityStatus.CONFLICT,
+                id=collection.id,
+                public_slug=collection.public_slug,
+                detail=(
+                    "This stream's collection belongs to a different family "
+                    "and was not reassigned"
+                ),
+            )
+
+        changed = False
+        if director_id is not None and collection.director_id != director_id:
+            try:
+                await self.collections.assert_director_capacity(
+                    director_id,
+                    published=collection.status == GiftCollectionStatus.PUBLISHED.value,
+                )
+            except ConflictError as exc:
+                return _collection_result(
+                    FoveoEntityStatus.CONFLICT,
+                    id=collection.id,
+                    public_slug=collection.public_slug,
+                    detail=exc.message,
+                )
+            collection.director_id = director_id
+            changed = True
+        if funeral_home_id is not None and collection.funeral_home_id != funeral_home_id:
+            collection.funeral_home_id = funeral_home_id
+            changed = True
+
+        if changed:
+            await self.db.flush()
+        return _collection_result(
+            FoveoEntityStatus.UPDATED if changed else FoveoEntityStatus.UNCHANGED,
+            id=collection.id,
+            public_slug=collection.public_slug,
+        )
 
     async def _get_event(self, event_id: UUID) -> Optional[FoveoSyncEvent]:
         result = await self.db.execute(
@@ -433,6 +624,18 @@ class FoveoSyncService:
         user.funeral_home_id = funeral_home.id
         await self.db.flush()
         return None
+
+
+def _collection_result(
+    status: FoveoEntityStatus,
+    *,
+    id: Optional[UUID] = None,
+    public_slug: Optional[str] = None,
+    detail: Optional[str] = None,
+) -> FoveoCollectionResult:
+    return FoveoCollectionResult(
+        status=status, id=id, public_slug=public_slug, detail=detail
+    )
 
 
 def _normalize_email(email: Optional[str]) -> Optional[str]:

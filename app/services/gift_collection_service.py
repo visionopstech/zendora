@@ -1,3 +1,5 @@
+import secrets
+import string
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, or_, select, update
@@ -191,6 +193,35 @@ class GiftCollectionService:
             select(func.count()).select_from(GiftCollection).where(*filters)
         )
         return result.scalar() or 0
+
+    async def get_by_foveo_stream_id(self, foveo_stream_id: int) -> Optional[GiftCollection]:
+        """Get the collection created for a Foveo stream, if any."""
+        result = await self.db.execute(
+            select(GiftCollection).where(GiftCollection.foveo_stream_id == foveo_stream_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def assert_director_capacity(
+        self, director_id: UUID, *, published: bool = True
+    ) -> None:
+        """
+        Raise ConflictError when a director cannot take one more collection.
+
+        Applies the same limits as the regular create/publish flow: a total cap
+        and, for published collections, a published cap.
+        """
+        await self._assert_director_collection_limit(director_id)
+        if published:
+            await self._assert_director_published_limit(director_id)
+
+    async def generate_unique_public_slug(self, length: int = 10, attempts: int = 10) -> str:
+        """Generate a random, unused public slug (lowercase letters and digits)."""
+        alphabet = string.ascii_lowercase + string.digits
+        for _ in range(attempts):
+            candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+            if await self.is_slug_available(candidate):
+                return candidate
+        raise ConflictError("Could not generate a unique public slug")
 
     async def _assert_director_collection_limit(self, director_id: UUID) -> None:
         total = await self.count_by_director(director_id)

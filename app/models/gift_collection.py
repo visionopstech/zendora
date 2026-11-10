@@ -50,6 +50,11 @@ class GiftCollection(Base):
         index=True
     )
     
+    # Foveo stream this collection was created for (set only by the Foveo sync)
+    foveo_stream_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, unique=True, index=True
+    )
+
     # Public access
     public_slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     
