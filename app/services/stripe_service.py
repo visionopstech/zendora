@@ -97,6 +97,9 @@ class StripeService:
             success_url=f"{settings.frontend_url}/order/{order_id}/success",
             cancel_url=f"{settings.frontend_url}/order/{order_id}/cancel",
             metadata={"order_id": str(order_id)},
+            # Copied onto the PaymentIntent so payment_intent.* webhooks
+            # (e.g. payment_failed) can be tied back to the order.
+            payment_intent_data={"metadata": {"order_id": str(order_id)}},
             customer_email=visitor_email,
             expires_at=int(time.time()) + CHECKOUT_SESSION_EXPIRY_SECONDS,
         )
@@ -129,6 +132,10 @@ class StripeService:
             quantities,
             visitor_email,
         )
+
+    async def retrieve_checkout_session(self, session_id: str) -> Any:
+        """Fetch a Checkout session from Stripe (used for reconciliation)."""
+        return await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
 
     def verify_webhook_signature(self, payload: bytes, signature: str) -> dict:
         """

@@ -29,6 +29,7 @@ from app.schemas.vendor import VendorDashboardStats
 from app.services.director_scope import director_can_read_order, director_data_scope
 from app.services.email_service import EmailService, order_ready_for_status_email
 from app.services.order_service import OrderService
+from app.services.payment_service import reconcile_order_status
 
 router = APIRouter()
 
@@ -315,6 +316,11 @@ async def get_order(
             detail="You do not have permission to view this order"
         )
     
+    # Self-heal orders whose Stripe webhook was lost or failed: ask Stripe for
+    # the real session state and apply it before answering.
+    if await reconcile_order_status(order):
+        await db.refresh(order, ["status", "paid_at"])
+
     vendor_id = (
         current_user.vendor_id
         if current_user.role == UserRole.VENDOR.value and current_user.vendor_id

@@ -14,13 +14,15 @@ os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_mock")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("SES_FROM_EMAIL", "test@example.com")
 
-from app.api.webhooks import (
+from app.models.order import OrderStatus
+from app.services.payment_service import (
     handle_expired_payment,
+    handle_payment_failed,
     handle_successful_payment,
+    reconcile_order_status,
     resolve_order_from_session,
     session_amount_matches_order,
 )
-from app.models.order import OrderStatus
 from app.services.stripe_service import (
     CheckoutSessionResult,
     StripeService,
@@ -134,6 +136,7 @@ async def test_create_checkout_session_returns_id_and_url():
     create_mock.assert_called_once()
     call_kwargs = create_mock.call_args.kwargs
     assert call_kwargs["metadata"] == {"order_id": str(order_id)}
+    assert call_kwargs["payment_intent_data"] == {"metadata": {"order_id": str(order_id)}}
     assert call_kwargs["line_items"][0]["price_data"]["unit_amount"] == 2500
 
 
@@ -168,12 +171,12 @@ async def test_handle_successful_payment_marks_paid_and_credits_commission():
     email_service = AsyncMock()
     email_service.notify_order_created = AsyncMock()
 
-    with patch("app.api.webhooks.AsyncSessionLocal") as session_local:
+    with patch("app.services.payment_service.AsyncSessionLocal") as session_local:
         session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         session_local.return_value.__aexit__ = AsyncMock(return_value=None)
-        with patch("app.api.webhooks.OrderService", return_value=order_service):
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
             with patch(
-                "app.api.webhooks.FinancialService", return_value=financial_service
+                "app.services.payment_service.FinancialService", return_value=financial_service
             ):
                 with patch(
                     "app.services.email_service.EmailService",
@@ -208,10 +211,10 @@ async def test_handle_successful_payment_skips_amount_mismatch():
     order_service.get_by_id = AsyncMock(return_value=order)
     order_service.mark_as_paid = AsyncMock()
 
-    with patch("app.api.webhooks.AsyncSessionLocal") as session_local:
+    with patch("app.services.payment_service.AsyncSessionLocal") as session_local:
         session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         session_local.return_value.__aexit__ = AsyncMock(return_value=None)
-        with patch("app.api.webhooks.OrderService", return_value=order_service):
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
             await handle_successful_payment(session)
 
     order_service.mark_as_paid.assert_not_awaited()
@@ -232,14 +235,218 @@ async def test_handle_expired_payment_marks_failed():
     order_service.get_by_id = AsyncMock(return_value=order)
     order_service.mark_as_failed = AsyncMock()
 
-    with patch("app.api.webhooks.AsyncSessionLocal") as session_local:
+    with patch("app.services.payment_service.AsyncSessionLocal") as session_local:
         session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         session_local.return_value.__aexit__ = AsyncMock(return_value=None)
-        with patch("app.api.webhooks.OrderService", return_value=order_service):
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
             await handle_expired_payment(session)
 
     order_service.mark_as_failed.assert_awaited_once_with(order_id)
     mock_db.commit.assert_awaited_once()
+
+
+def _patched_payment_env(order_service, financial_service=None):
+    """Context managers patching the payment_service collaborators."""
+    mock_db = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+    session_local = patch("app.services.payment_service.AsyncSessionLocal")
+    return mock_db, session_local
+
+
+@pytest.mark.asyncio
+async def test_paid_status_survives_commission_credit_failure():
+    order_id = uuid4()
+    order = SimpleNamespace(
+        id=order_id,
+        status=OrderStatus.PENDING.value,
+        total_amount=Decimal("20.00"),
+    )
+    session = {
+        "id": "cs_test_paid",
+        "metadata": {"order_id": str(order_id)},
+        "amount_total": 2000,
+        "payment_status": "paid",
+    }
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=order)
+    order_service.mark_as_paid = AsyncMock()
+    financial_service = AsyncMock()
+    financial_service.credit_order_commission = AsyncMock(
+        side_effect=RuntimeError("wallet insert failed")
+    )
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            with patch(
+                "app.services.payment_service.FinancialService",
+                return_value=financial_service,
+            ):
+                with pytest.raises(RuntimeError):
+                    await handle_successful_payment(session)
+
+    order_service.mark_as_paid.assert_awaited_once_with(order_id)
+    # PAID was committed before the failing commission credit.
+    mock_db.commit.assert_awaited_once()
+    mock_db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_payment_does_not_regress_fulfilment_status():
+    order_id = uuid4()
+    order = SimpleNamespace(
+        id=order_id,
+        status=OrderStatus.SHIPPING.value,
+        total_amount=Decimal("20.00"),
+    )
+    session = {"id": "cs_x", "metadata": {"order_id": str(order_id)}, "amount_total": 2000}
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=order)
+    order_service.mark_as_paid = AsyncMock()
+    financial_service = AsyncMock()
+    financial_service.credit_order_commission = AsyncMock(return_value=False)
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            with patch(
+                "app.services.payment_service.FinancialService",
+                return_value=financial_service,
+            ):
+                await handle_successful_payment(session)
+
+    order_service.mark_as_paid.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_expired_payment_does_not_fail_non_pending_order():
+    order_id = uuid4()
+    order = SimpleNamespace(id=order_id, status=OrderStatus.CANCELED.value)
+    session = {"metadata": {"order_id": str(order_id)}, "id": "cs_test_expired"}
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=order)
+    order_service.mark_as_failed = AsyncMock()
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            await handle_expired_payment(session)
+
+    order_service.mark_as_failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_expired_payment_reraises_errors_for_stripe_retry():
+    order_id = uuid4()
+    session = {"metadata": {"order_id": str(order_id)}, "id": "cs_test_expired"}
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(side_effect=RuntimeError("db down"))
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            with pytest.raises(RuntimeError):
+                await handle_expired_payment(session)
+
+    mock_db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_payment_failed_marks_pending_order_failed():
+    order_id = uuid4()
+    order = SimpleNamespace(id=order_id, status=OrderStatus.PENDING.value)
+    payment_intent = {"id": "pi_1", "metadata": {"order_id": str(order_id)}}
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=order)
+    order_service.mark_as_failed = AsyncMock()
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            await handle_payment_failed(payment_intent)
+
+    order_service.mark_as_failed.assert_awaited_once_with(order_id)
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_payment_failed_ignores_paid_order_and_missing_metadata():
+    order_id = uuid4()
+    order = SimpleNamespace(id=order_id, status=OrderStatus.PAID.value)
+    mock_db, session_local_patch = _patched_payment_env(None)
+
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=order)
+    order_service.mark_as_failed = AsyncMock()
+
+    with session_local_patch as session_local:
+        session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.payment_service.OrderService", return_value=order_service):
+            await handle_payment_failed({"id": "pi_2", "metadata": {"order_id": str(order_id)}})
+            await handle_payment_failed({"id": "pi_3", "metadata": {}})
+
+    order_service.mark_as_failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_marks_paid_when_stripe_session_is_paid():
+    order = SimpleNamespace(id=uuid4(), status=OrderStatus.PENDING.value, stripe_session_id="cs_test_1")
+    paid_session = {"id": "cs_test_1", "payment_status": "paid", "status": "complete"}
+    updated = SimpleNamespace(status=OrderStatus.PAID.value)
+
+    mock_db = AsyncMock()
+    order_service = AsyncMock()
+    order_service.get_by_id = AsyncMock(return_value=updated)
+
+    with patch(
+        "app.services.payment_service.StripeService.retrieve_checkout_session",
+        new=AsyncMock(return_value=paid_session),
+    ):
+        with patch(
+            "app.services.payment_service.handle_successful_payment", new=AsyncMock()
+        ) as paid_handler:
+            with patch("app.services.payment_service.AsyncSessionLocal") as session_local:
+                session_local.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                session_local.return_value.__aexit__ = AsyncMock(return_value=None)
+                with patch(
+                    "app.services.payment_service.OrderService", return_value=order_service
+                ):
+                    changed = await reconcile_order_status(order)
+
+    paid_handler.assert_awaited_once_with(paid_session)
+    assert changed is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_settled_orders_and_swallows_stripe_errors():
+    paid = SimpleNamespace(id=uuid4(), status=OrderStatus.PAID.value, stripe_session_id="cs_1")
+    temp = SimpleNamespace(id=uuid4(), status=OrderStatus.PENDING.value, stripe_session_id="pending_x")
+    pending = SimpleNamespace(id=uuid4(), status=OrderStatus.PENDING.value, stripe_session_id="cs_2")
+
+    assert await reconcile_order_status(paid) is False
+    assert await reconcile_order_status(temp) is False
+    with patch(
+        "app.services.payment_service.StripeService.retrieve_checkout_session",
+        new=AsyncMock(side_effect=RuntimeError("stripe down")),
+    ):
+        assert await reconcile_order_status(pending) is False
 
 
 def test_verify_webhook_signature_delegates_to_stripe():
