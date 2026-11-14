@@ -31,10 +31,20 @@ from app.services.email_template_service import EmailTemplateService
 
 logger = logging.getLogger(__name__)
 
-# Status mail is for an order that has already been paid. REFUNDED is a later
-# change. FAILED counts only when payment previously succeeded.
+# Status mail is for an order that has already been paid. REFUNDED, PROCESSING
+# and SHIPPING are later changes. FAILED and CANCELED count only when payment
+# previously succeeded.
 POST_PAYMENT_STATUSES = frozenset(
-    {OrderStatus.PAID.value, OrderStatus.REFUNDED.value}
+    {
+        OrderStatus.PAID.value,
+        OrderStatus.REFUNDED.value,
+        OrderStatus.PROCESSING.value,
+        OrderStatus.SHIPPING.value,
+    }
+)
+
+_PAID_ONLY_STATUSES = frozenset(
+    {OrderStatus.FAILED.value, OrderStatus.CANCELED.value}
 )
 
 
@@ -42,7 +52,7 @@ def order_ready_for_status_email(order: Order) -> bool:
     """True when the order has been paid, so a later status email is allowed."""
     if order.status in POST_PAYMENT_STATUSES:
         return True
-    return order.status == OrderStatus.FAILED.value and order.paid_at is not None
+    return order.status in _PAID_ONLY_STATUSES and order.paid_at is not None
 
 
 @dataclass

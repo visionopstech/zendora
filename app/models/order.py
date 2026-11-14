@@ -15,6 +15,9 @@ class OrderStatus(str, enum.Enum):
     PAID = "PAID"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
+    PROCESSING = "PROCESSING"
+    SHIPPING = "SHIPPING"
+    CANCELED = "CANCELED"
 
 
 class Order(Base):
