@@ -31,8 +31,8 @@ from app.services.email_template_service import EmailTemplateService
 
 logger = logging.getLogger(__name__)
 
-# Status mail is for an order that has already been paid. REFUNDED, PROCESSING
-# and SHIPPING are later changes. FAILED and CANCELED count only when payment
+# Status mail is for an order that has already been paid. REFUNDED, PROCESSING,
+# SHIPPING and COMPLETED are later changes. FAILED and CANCELED count only when payment
 # previously succeeded.
 POST_PAYMENT_STATUSES = frozenset(
     {
@@ -40,6 +40,7 @@ POST_PAYMENT_STATUSES = frozenset(
         OrderStatus.REFUNDED.value,
         OrderStatus.PROCESSING.value,
         OrderStatus.SHIPPING.value,
+        OrderStatus.COMPLETED.value,
     }
 )
 
