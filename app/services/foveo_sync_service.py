@@ -77,6 +77,13 @@ class FoveoSyncService:
         funeral_home: Optional[FuneralHome] = None
         main_user: Optional[User] = None
         stream_user: Optional[User] = None
+        # An explicit `"stream_director": null` on stream.updated means Foveo removed
+        # the director from the stream. An omitted key keeps the usual fallback.
+        stream_director_removed = (
+            payload.event == FoveoEventType.STREAM_UPDATED
+            and "stream_director" in payload.model_fields_set
+            and payload.stream_director is None
+        )
 
         if process_home and payload.funeral_home is not None:
             response.funeral_home, funeral_home = await self._upsert_funeral_home(
@@ -120,6 +127,8 @@ class FoveoSyncService:
                     )
 
         family_user: Optional[User] = None
+        removal_applied = False
+        replacement_director_id: Optional[UUID] = None
 
         if payload.event in _STREAM_PERSON_EVENTS or (
             payload.event == FoveoEventType.USER_UPDATED and payload.family is not None
@@ -131,6 +140,8 @@ class FoveoSyncService:
                     or response.stream_director.status in _APPLIED_STATUSES
                 ):
                     director_id = stream_user.id
+                elif stream_director_removed:
+                    director_id = None
                 elif main_user is not None and (
                     response.main_director is None
                     or response.main_director.status in _APPLIED_STATUSES
@@ -142,6 +153,26 @@ class FoveoSyncService:
                     director_id=director_id,
                     allow_create=allow_create,
                 )
+                if (
+                    stream_director_removed
+                    and family_user is not None
+                    and response.family is not None
+                    and response.family.status in _APPLIED_STATUSES
+                ):
+                    removal_applied = True
+                    replacement_director_id = await self._director_after_removal(
+                        payload,
+                        family_user=family_user,
+                        main_director_id=(
+                            funeral_home.director_id if funeral_home is not None else None
+                        ),
+                    )
+                    if family_user.director_id != replacement_director_id:
+                        family_user.director_id = replacement_director_id
+                        await self.db.flush()
+                        response.family = FoveoSyncEntityResult(
+                            status=FoveoEntityStatus.UPDATED, id=family_user.id
+                        )
 
         if payload.event in _STREAM_PERSON_EVENTS and payload.family is not None:
             response.collection = await self._sync_collection(
@@ -149,6 +180,8 @@ class FoveoSyncService:
                 funeral_home=funeral_home,
                 family_user=family_user,
                 family_result=response.family,
+                remove_director=removal_applied,
+                replacement_director_id=replacement_director_id,
             )
 
         await self._record_event(payload, response)
@@ -161,6 +194,8 @@ class FoveoSyncService:
         funeral_home: Optional[FuneralHome],
         family_user: Optional[User],
         family_result: Optional[FoveoSyncEntityResult],
+        remove_director: bool = False,
+        replacement_director_id: Optional[UUID] = None,
     ) -> FoveoCollectionResult:
         """
         Ensure the stream has exactly one gift collection, owned by its family.
@@ -196,6 +231,8 @@ class FoveoSyncService:
                 family_user=family_user,
                 director_id=director_id,
                 funeral_home_id=funeral_home_id,
+                remove_director=remove_director,
+                replacement_director_id=replacement_director_id,
             )
 
         published = await self.collections.get_published_by_family_admin(family_user.id)
@@ -251,6 +288,30 @@ class FoveoSyncService:
             FoveoEntityStatus.CREATED, id=collection.id, public_slug=collection.public_slug
         )
 
+    async def _director_after_removal(
+        self,
+        payload: FoveoSyncRequest,
+        *,
+        family_user: User,
+        main_director_id: Optional[UUID],
+    ) -> Optional[UUID]:
+        """
+        Who directs a stream once Foveo removed its director.
+
+        A non-main director falls back to the main director. When the director
+        being removed is the main director (or there is none), it becomes None.
+        """
+        current = family_user.director_id
+        if payload.foveo_stream_id is not None:
+            existing = await self.collections.get_by_foveo_stream_id(
+                payload.foveo_stream_id
+            )
+            if existing is not None and existing.family_admin_id == family_user.id:
+                current = existing.director_id
+        if current is None or current == main_director_id:
+            return None
+        return main_director_id
+
     async def _pick_default_collection(
         self, payload: FoveoSyncRequest, family_user: User
     ) -> tuple[Optional[object], Optional[FoveoCollectionResult]]:
@@ -288,8 +349,15 @@ class FoveoSyncService:
         family_user: User,
         director_id: Optional[UUID],
         funeral_home_id: Optional[UUID],
+        remove_director: bool = False,
+        replacement_director_id: Optional[UUID] = None,
     ) -> FoveoCollectionResult:
-        """Keep an existing stream collection's director and funeral home in step."""
+        """
+        Keep an existing stream collection's director and funeral home in step.
+
+        `remove_director` means Foveo dropped the director from the stream: the
+        collection takes `replacement_director_id` (the main director, or None).
+        """
         if collection.family_admin_id != family_user.id:
             return _collection_result(
                 FoveoEntityStatus.CONFLICT,
@@ -302,7 +370,11 @@ class FoveoSyncService:
             )
 
         changed = False
-        if director_id is not None and collection.director_id != director_id:
+        if remove_director:
+            if collection.director_id != replacement_director_id:
+                collection.director_id = replacement_director_id
+                changed = True
+        elif director_id is not None and collection.director_id != director_id:
             try:
                 await self.collections.assert_director_capacity(
                     director_id,

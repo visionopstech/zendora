@@ -242,9 +242,13 @@ def _payload(**kwargs):
 class FakeCollectionService(GiftCollectionService):
     """In-memory collections; keeps the real limit and slug logic."""
 
-    def __init__(self, store):
+    def __init__(self, store, homes=()):
         super().__init__(db=None)
         self.store = store
+        self.homes = homes
+
+    async def is_main_director(self, director_id):
+        return any(home.director_id == director_id for home in self.homes)
 
     async def get_by_foveo_stream_id(self, foveo_stream_id):
         return next((c for c in self.store if c.foveo_stream_id == foveo_stream_id), None)
@@ -320,7 +324,9 @@ def _default_collection(**kwargs):
 
 def _service(with_default=True):
     service = FoveoSyncService(FakeSession())
-    service.collections = FakeCollectionService(service.db.collections)
+    service.collections = FakeCollectionService(
+        service.db.collections, service.db.funeral_homes
+    )
     service.defaults = FakeDefaultService(
         [_default_collection()] if with_default else []
     )
@@ -822,6 +828,105 @@ async def test_replaced_stream_director_moves_the_collection():
     assert result.collection.status == FoveoEntityStatus.UPDATED
     assert service.db.collections[0].director_id == new_director.id
     assert len(service.db.collections) == 1
+
+
+@pytest.mark.asyncio
+async def test_null_stream_director_falls_back_to_main_director():
+    service = _service()
+    await service.sync(_stream_payload())
+    stream = next(u for u in service.db.users if u.foveo_user_id == 11)
+    assert service.db.collections[0].director_id == stream.id
+
+    result = await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            stream_director=None,
+        )
+    )
+    main = next(u for u in service.db.users if u.foveo_user_id == 10)
+    family = next(u for u in service.db.users if u.foveo_user_id == 12)
+    assert result.stream_director is None
+    assert result.collection.status == FoveoEntityStatus.UPDATED
+    assert service.db.collections[0].director_id == main.id
+    assert family.director_id == main.id
+    assert len(service.db.collections) == 1
+
+
+@pytest.mark.asyncio
+async def test_null_stream_director_removes_main_director_from_collection():
+    service = _service()
+    await service.sync(_stream_payload())
+    await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            stream_director=None,
+        )
+    )
+    main = next(u for u in service.db.users if u.foveo_user_id == 10)
+    assert service.db.collections[0].director_id == main.id
+
+    result = await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            stream_director=None,
+        )
+    )
+    family = next(u for u in service.db.users if u.foveo_user_id == 12)
+    assert result.collection.status == FoveoEntityStatus.UPDATED
+    assert service.db.collections[0].director_id is None
+    assert family.director_id is None
+
+    again = await service.sync(
+        _stream_payload(
+            event_id=uuid4(),
+            event=FoveoEventType.STREAM_UPDATED,
+            stream_director=None,
+        )
+    )
+    assert again.collection.status == FoveoEntityStatus.UNCHANGED
+    assert service.db.collections[0].director_id is None
+
+
+@pytest.mark.asyncio
+async def test_omitted_stream_director_on_update_keeps_director():
+    service = _service()
+    await service.sync(_stream_payload())
+    original = service.db.collections[0].director_id
+
+    payload = _stream_payload(event_id=uuid4(), event=FoveoEventType.STREAM_UPDATED)
+    data = payload.model_dump(exclude={"stream_director"})
+    result = await service.sync(FoveoSyncRequest(**data))
+
+    assert result.collection.status in {
+        FoveoEntityStatus.UPDATED,
+        FoveoEntityStatus.UNCHANGED,
+    }
+    assert service.db.collections[0].director_id is not None
+    assert original is not None
+
+
+@pytest.mark.asyncio
+async def test_main_director_is_exempt_from_collection_limits():
+    service = _service()
+    await service.sync(_payload())
+    main = next(u for u in service.db.users if u.foveo_user_id == 10)
+    for index in range(MAX_COLLECTIONS_PER_DIRECTOR):
+        service.db.collections.append(
+            GiftCollection(
+                id=uuid4(),
+                family_admin_id=uuid4(),
+                director_id=main.id,
+                public_slug=f"seed-{index}",
+                status=GiftCollectionStatus.PUBLISHED.value,
+            )
+        )
+    await service.collections.assert_director_capacity(main.id)
+
+    result = await service.sync(_stream_payload(stream_director=None))
+    assert result.collection.status == FoveoEntityStatus.CREATED
 
 
 @pytest.mark.asyncio

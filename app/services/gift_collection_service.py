@@ -12,6 +12,7 @@ from app.models.gift_collection import (
     GiftCollectionProduct,
     GiftCollectionStatus,
 )
+from app.models.funeral_home import FuneralHome
 from app.models.product import Product
 from app.models.user import User
 from app.core.exceptions import NotFoundException, ConflictError, PermissionDenied
@@ -223,7 +224,17 @@ class GiftCollectionService:
                 return candidate
         raise ConflictError("Could not generate a unique public slug")
 
+    async def is_main_director(self, director_id: UUID) -> bool:
+        """True when the user is the main director of a funeral home."""
+        result = await self.db.execute(
+            select(FuneralHome.id).where(FuneralHome.director_id == director_id).limit(1)
+        )
+        return result.first() is not None
+
     async def _assert_director_collection_limit(self, director_id: UUID) -> None:
+        """Main directors are exempt from the per-director collection caps."""
+        if await self.is_main_director(director_id):
+            return
         total = await self.count_by_director(director_id)
         if total >= MAX_COLLECTIONS_PER_DIRECTOR:
             raise ConflictError(
@@ -231,6 +242,9 @@ class GiftCollectionService:
             )
 
     async def _assert_director_published_limit(self, director_id: UUID) -> None:
+        """Main directors are exempt from the per-director published caps."""
+        if await self.is_main_director(director_id):
+            return
         published = await self.count_by_director(
             director_id, status=GiftCollectionStatus.PUBLISHED.value
         )

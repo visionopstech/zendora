@@ -154,6 +154,7 @@ def test_main_director_can_read_home_family_but_other_cannot():
 @pytest.mark.asyncio
 async def test_create_rejects_sixth_collection_for_director():
     service = GiftCollectionService(AsyncMock())
+    service.is_main_director = AsyncMock(return_value=False)
     service.count_by_director = AsyncMock(return_value=MAX_COLLECTIONS_PER_DIRECTOR)
 
     with pytest.raises(ConflictError) as exc:
@@ -167,6 +168,18 @@ async def test_create_rejects_sixth_collection_for_director():
 
 
 @pytest.mark.asyncio
+async def test_main_director_is_exempt_from_collection_limits():
+    service = GiftCollectionService(AsyncMock())
+    service.is_main_director = AsyncMock(return_value=True)
+    service.count_by_director = AsyncMock(return_value=MAX_COLLECTIONS_PER_DIRECTOR)
+
+    director_id = uuid4()
+    await service.assert_director_capacity(director_id, published=True)
+
+    service.count_by_director.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_publish_rejects_fourth_published_collection_for_director():
     collection = SimpleNamespace(
         id=uuid4(),
@@ -177,6 +190,7 @@ async def test_publish_rejects_fourth_published_collection_for_director():
     service = GiftCollectionService(AsyncMock())
     service.get_by_id = AsyncMock(return_value=collection)
     service.get_published_by_family_admin = AsyncMock(return_value=None)
+    service.is_main_director = AsyncMock(return_value=False)
     service.count_by_director = AsyncMock(return_value=MAX_PUBLISHED_PER_DIRECTOR)
 
     with pytest.raises(ConflictError) as exc:
